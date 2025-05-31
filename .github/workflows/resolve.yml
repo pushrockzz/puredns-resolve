@@ -106,7 +106,7 @@ jobs:
       - name: Extract Chunks and Resolvers for Secondary
         shell: bash
         run: |
-          PACKAGE_FILENAME="${{ github.event.input.chunk_package_artifact_name }}.tar.gz"
+          PACKAGE_FILENAME="${{ github.event.inputs.chunk_package_artifact_name }}.tar.gz"
           echo "SECONDARY WORKER: Extracting $PACKAGE_FILENAME..."
           tar -xzvf "$PACKAGE_FILENAME"
           if [ ! -d "chunks" ] || [ ! -f "resolvers.txt" ]; then
