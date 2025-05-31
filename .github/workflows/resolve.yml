@@ -5,7 +5,31 @@ on:
   workflow_dispatch: # Allows manual triggering for testing
   repository_dispatch:
     types: [distribute_and_trigger_secondary] # Must match the type if Account 1 uses repository_dispatch.
-                                       # benc-uk/workflow-dispatch triggers 'workflow_dispatch' on the target.
+    inputs:
+      primary_github_server_url: # Must match the key sent from Account 1
+        description: 'Server URL of the primary GitHub instance'
+        required: true # Or false if it can be optional, but likely true
+        type: string
+      primary_repo_owner:
+        description: 'Owner of the primary repository that triggered this workflow'
+        required: true
+        type: string
+      primary_repo_name:
+        description: 'Name of the primary repository that triggered this workflow'
+        required: true
+        type: string
+      primary_run_id:
+        description: 'Run ID of the primary workflow in Account 1'
+        required: true
+        type: string # Run IDs are numbers but often handled as strings
+      chunk_package_artifact_name:
+        description: 'Name of the artifact package containing chunks from Account 1'
+        required: true
+        type: string
+      secondary_matrix_json:
+        description: 'JSON string representing the matrix of chunks for this secondary worker'
+        required: true
+        type: string # It's a JSON string, so type string is appropriate here                                       # benc-uk/workflow-dispatch triggers 'workflow_dispatch' on the target.
 
 permissions:
   contents: write # To commit results to its own repository
