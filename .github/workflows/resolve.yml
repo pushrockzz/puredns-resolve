@@ -82,7 +82,7 @@ jobs:
       - name: Extract Chunks and Resolvers for Secondary
         shell: bash
         run: |
-          PACKAGE_FILENAME="${{ github.event.client_payload.chunk_package_artifact_name }}.tar.gz"
+          PACKAGE_FILENAME="${{ github.event.input.chunk_package_artifact_name }}.tar.gz"
           echo "SECONDARY WORKER: Extracting $PACKAGE_FILENAME..."
           tar -xzvf "$PACKAGE_FILENAME"
           if [ ! -d "chunks" ] || [ ! -f "resolvers.txt" ]; then
@@ -123,7 +123,7 @@ jobs:
           echo "CHUNK_BASENAME_SECONDARY=$CHUNK_BASENAME" >> $GITHUB_ENV
           echo "RESOLVED_FILE_PATH=$OUT_FILE" >> $GITHUB_ENV # For potential commit step
 
-      - name: Commit and Push Individual Result (Alternative: Aggregate then commit)
+      - name: Commit and Push Individual Result ()
         # This commits after each chunk. For many chunks, this is noisy.
         # Better to aggregate results and commit once at the end of the job or workflow.
         # For now, this shows how an individual result could be committed.
