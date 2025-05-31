@@ -4,7 +4,7 @@ name: PureDNS Secondary Worker
 on:
   workflow_dispatch: # Allows manual triggering for testing
   repository_dispatch:
-    types: [trigger-puredns-secondary] # Must match the type if Account 1 uses repository_dispatch.
+    types: [distribute_and_trigger_secondary] # Must match the type if Account 1 uses repository_dispatch.
                                        # benc-uk/workflow-dispatch triggers 'workflow_dispatch' on the target.
 
 permissions:
