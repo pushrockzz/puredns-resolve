@@ -49,7 +49,7 @@ jobs:
         password: ${{ secrets.GHCR_TOKEN }} # GHCR_TOKEN for Account 2 if image is private to Account 2
     strategy:
       fail-fast: false
-      max-parallel: ${{ env.SECONDARY_ACCOUNT_MAX_PARALLEL }}
+      max-parallel: 20
       matrix:
         # The 'pair' matrix is populated by the 'secondary_matrix_json' from Account 1's client_payload
         pair: ${{ fromJson(github.event.inputs.secondary_matrix_json || '[]') }}
