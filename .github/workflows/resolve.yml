@@ -3,8 +3,8 @@ name: PureDNS Secondary Worker
 
 on:
   workflow_dispatch: # Allows manual triggering for testing
-  repository_dispatch:
-    types: [distribute_and_trigger_secondary] # Must match the type if Account 1 uses repository_dispatch.
+  #repository_dispatch:
+   # types: [distribute_and_trigger_secondary] # Must match the type if Account 1 uses repository_dispatch.
     inputs:
       #primary_github_server_url:
        # description: 'The server URL of the primary GitHub instance (e.g., https://github.com)'
