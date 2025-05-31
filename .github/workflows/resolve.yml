@@ -80,9 +80,30 @@ jobs:
           echo "SECONDARY WORKER: Attempting to download artifact '$ARTIFACT_NAME_FROM_PRIMARY' from $PRIMARY_REPO_OWNER/$PRIMARY_REPO_NAME, run ID $PRIMARY_RUN_ID"
           
           # Using GitHub CLI to download artifact - ensure gh is in the container or installed
-          # if ! command -v gh &> /dev/null; then apt-get update && apt-get install -y gh; fi # Example install
 
-          # Login with the PAT to access artifacts from the primary account's private repo (if it is)
+
+          if ! command -v gh &> /dev/null; then
+            echo "INFO: gh CLI not found. Attempting installation..."
+            # Installation for Debian/Ubuntu-based containers (like many default GitHub runners or common base images)
+            # Adjust if your container is different (e.g., Alpine, CentOS)
+            apt-get update -qy
+            apt-get install -qy curl # Ensure curl is available for the next step
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            apt-get update -qy
+            apt-get install -qy gh
+            if ! command -v gh &> /dev/null; then
+              echo "ERROR: gh CLI installation failed."
+              exit 1
+            else
+              echo "INFO: gh CLI successfully installed. Version: $(gh --version)"
+            fi
+          else
+            echo "INFO: gh CLI already available. Version: $(gh --version)"
+          fi
+          # --- END OF ADDED GH CLI INSTALLATION ---
+      
           # The PAT needs 'actions:read' scope for the primary repo.
           echo "$GH_TOKEN_PRIMARY_ACCOUNT_READ" | gh auth login --with-token
 
