@@ -28,12 +28,12 @@ jobs:
       max-parallel: ${{ env.SECONDARY_ACCOUNT_MAX_PARALLEL }}
       matrix:
         # The 'pair' matrix is populated by the 'secondary_matrix_json' from Account 1's client_payload
-        pair: ${{ fromJson(github.event.client_payload.secondary_matrix_json || '[]') }}
+        pair: ${{ fromJson(github.event.inputs.secondary_matrix_json || '[]') }}
     steps:
       - name: Display Trigger Payload (Debug)
         run: |
           echo "SECONDARY WORKER: Received payload:"
-          echo "${{ toJson(github.event.client_payload) }}"
+          echo "${{ toJson(github.event.inputs) }}"
           echo "---"
           echo "SECONDARY WORKER: My assigned matrix for this job instance:"
           echo "${{ toJson(matrix.pair) }}"
@@ -47,10 +47,10 @@ jobs:
           # This token allows this workflow (Account 2) to read artifacts from Account 1's repo runs.
           # It must be a PAT from Account 1 with 'actions:read' scope on Account 1's repo.
           GH_TOKEN_PRIMARY_ACCOUNT_READ: ${{ secrets.PAT_FOR_PRIMARY_ACCOUNT_ARTIFACTS_READ }}
-          PRIMARY_REPO_OWNER: ${{ github.event.client_payload.primary_repo_owner }}
-          PRIMARY_REPO_NAME: ${{ github.event.client_payload.primary_repo_name }}
-          PRIMARY_RUN_ID: ${{ github.event.client_payload.primary_run_id }}
-          ARTIFACT_NAME_FROM_PRIMARY: ${{ github.event.client_payload.chunk_package_artifact_name }}
+          PRIMARY_REPO_OWNER: ${{ github.event.inputs.primary_repo_owner }}
+          PRIMARY_REPO_NAME: ${{ github.event.inputs.primary_repo_name }}
+          PRIMARY_RUN_ID: ${{ github.event.inputs.primary_run_id }}
+          ARTIFACT_NAME_FROM_PRIMARY: ${{ github.event.inputs.chunk_package_artifact_name }}
         shell: bash
         run: |
           echo "SECONDARY WORKER: Attempting to download artifact '$ARTIFACT_NAME_FROM_PRIMARY' from $PRIMARY_REPO_OWNER/$PRIMARY_REPO_NAME, run ID $PRIMARY_RUN_ID"
@@ -295,7 +295,7 @@ jobs:
             # Check if there are any changes staged for commit
             if ! git diff --staged --quiet; then
               echo "Committing results..."
-              git commit -m "Add/Update PureDNS results from Secondary Account (Run: ${{ github.event.client_payload.primary_run_id || github.run_id }})"
+              git commit -m "Add/Update PureDNS results from Secondary Account (Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"
               # git pull --rebase # Good practice before push, especially if branch is active
               git push
               echo "Results committed and pushed."
