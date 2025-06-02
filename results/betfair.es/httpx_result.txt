@@ -1,0 +1,9 @@
+https://juegoresponsable.betfair.es
+https://ips.betfair.es
+https://maintenance.betfair.es
+https://launcher.betfair.es
+https://identitysso.betfair.es
+https://lbr.betfair.es
+https://gfe.betfair.es
+https://gmd.betfair.es
+https://graphs.betfair.es
