@@ -178,6 +178,7 @@ jobs:
             ' "$HTTPX_OUT" > "$OUTPUT_ROOT/$parent/httpx_result.txt"
           done < parent_domains.txt
           echo "-> Split complete for domain '$DOMAIN'."
+          mkdir -p results
 
       - name: Upload Secondary Account httpx+dsieve Results (as artifact)
         uses: actions/upload-artifact@v4
