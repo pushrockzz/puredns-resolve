@@ -52,7 +52,7 @@ jobs:
     steps:
       - name: Debug Count of matrix entries
         run: |
-          echo "${{ github.event.inputs.secondary_matrix_json }}" | jq length
+          echo '${{ github.event.inputs.secondary_matrix_json }}' | jq length
           
       - name: Display Trigger Payload (Debug)
         run: |
