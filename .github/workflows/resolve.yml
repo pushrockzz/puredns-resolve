@@ -216,15 +216,13 @@ jobs:
           echo "Organizing downloaded results..."
           mkdir -p results
 
-          for artifact_dir in temp_results/secondary_httpx_dsieve_*; do
-            if [ -d "$artifact_dir" ]; then
-              if [ -d "$artifact_dir/results" ]; then
-                cp -R "$artifact_dir/results/"* ./results/ || echo "No nested results in $artifact_dir"
-              else
-                echo "No 'results/' directory in $artifact_dir"
-              fi
-            fi
-          done
+          # Find every httpx_result.txt inside each downloaded artifact and copy to ./results/<parent>/
+          mkdir -p results
+          find temp_results -type f -name "httpx_result.txt" | while read -r filepath; do
+            parent="$(basename "$(dirname "$filepath")")"
+            mkdir -p "results/$parent"
+            cp "$filepath" "results/$parent/httpx_result.txt"
+          done || true
 
           git config --global user.name "Account2 PureDNS Bot"
           git config --global user.email "actions-bot@users.noreply.github.com"
