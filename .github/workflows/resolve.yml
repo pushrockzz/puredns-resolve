@@ -111,16 +111,6 @@ jobs:
           ls -R chunks/
           ls resolvers.txt resolvers-trusted.txt
 
-      - name: Set up Go & install httpx + dsieve
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.20'
-
-      - name: Install httpx and dsieve
-        run: |
-          GO111MODULE=on go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          GO111MODULE=on go install github.com/trickest/dsieve@latest
-          echo "GOBIN=$(go env GOBIN)" >> $GITHUB_ENV
 
       - name: Run httpx + pre-dsieve on subdomains + final filtering
         shell: bash
@@ -136,16 +126,16 @@ jobs:
 
           # Step A: pre-dsieve on raw subdomain chunk
           echo "-> Generating parent_domains.txt from raw subdomains..."
-          "$GOBIN/dsieve" -if "$CHUNK_FILE_PATH" -f 2 | sort -u > parent_domains.txt
+          dsieve -if "$CHUNK_FILE_PATH" -f 2 | sort -u > parent_domains.txt
           echo "  Parent count: $(wc -l < parent_domains.txt)"
           head -n 5 parent_domains.txt || true
 
           # Step B: Probe with httpx
           HTTPX_OUT="httpx_output.txt"
           echo "-> Running httpx (100 threads) against '$CHUNK_FILE_PATH'..."
-          "$GOBIN/httpx" \
+          httpx \
             -l "$CHUNK_FILE_PATH" \
-            -threads 100 \
+            -threads 200 \
             -silent \
             -no-color \
             -o "$HTTPX_OUT"
