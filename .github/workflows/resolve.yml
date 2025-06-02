@@ -50,6 +50,10 @@ jobs:
       matrix:
         pair: ${{ fromJson(github.event.inputs.secondary_matrix_json && github.event.inputs.secondary_matrix_json || '[]') }}
     steps:
+      - name: Debug Count of matrix entries
+        run: |
+          echo "${{ github.event.inputs.secondary_matrix_json }}" | jq length
+          
       - name: Display Trigger Payload (Debug)
         run: |
           echo "SECONDARY WORKER: Received payload:"
@@ -96,7 +100,13 @@ jobs:
             exit 1
           fi
           echo "Downloaded '$PACKAGE_FILENAME'."
-
+      
+      - name: Debug Raw JSON passed to matrix
+        run: |
+          echo "${{ github.event.inputs.secondary_matrix_json }}"
+          echo
+          echo "Parsed array length: $(echo "${{ github.event.inputs.secondary_matrix_json }}" | jq length)"
+          
       - name: Extract Chunks and Resolvers for Secondary
         shell: bash
         run: |
