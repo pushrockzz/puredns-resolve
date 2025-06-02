@@ -52,9 +52,7 @@ jobs:
     steps:
       - name: Debug Count of matrix entries
         run: |
-          jq length <<EOF
-          ${{ github.event.inputs.secondary_matrix_json }}
-          EOF | jq length
+          jq length <<< '${{ github.event.inputs.secondary_matrix_json }}'
           
       - name: Display Trigger Payload (Debug)
         run: |
@@ -107,7 +105,7 @@ jobs:
         run: |
           echo "${{ github.event.inputs.secondary_matrix_json }}"
           echo
-          echo "Parsed array length: jq length <<EOF ${{ github.event.inputs.secondary_matrix_json }} EOF"
+          echo "Parsed array length: jq length <<< '${{ github.event.inputs.secondary_matrix_json }}'"
           
       - name: Extract Chunks and Resolvers for Secondary
         shell: bash
