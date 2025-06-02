@@ -183,7 +183,7 @@ jobs:
       - name: Upload Secondary Account httpx+dsieve Results (as artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: secondary_httpx_dsieve_${{ matrix.pair.domain }}_${{ matrix.pair.chunk }}
+          name: secondary_httpx_dsieve_${{ matrix.pair.domain }}_${{ replace(matrix.pair.chunk, '/', '_') }}
           path: results/
           retention-days: 1
 
