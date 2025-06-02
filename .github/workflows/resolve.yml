@@ -1,10 +1,7 @@
-
 name: PureDNS Secondary Worker
 
 on:
-  workflow_dispatch: # Allows manual triggering for testing
-  #repository_dispatch:
-   # types: [distribute_and_trigger_secondary] # Must match the type if Account 1 uses repository_dispatch.
+  workflow_dispatch:
     inputs:
       primary_github_server_url:
         description: 'The server URL of the primary GitHub instance (e.g., https://github.com)'
@@ -21,7 +18,7 @@ on:
       primary_run_id:
         description: 'The run ID of the workflow in the primary repository.'
         required: true
-        type: string # Run IDs are usually numbers but can be treated as strings
+        type: string
       chunk_package_artifact_name:
         description: 'The name of the artifact package containing all chunks and resolvers.'
         required: true
@@ -29,11 +26,11 @@ on:
       secondary_matrix_json:
         description: 'The JSON string representing the matrix of chunks assigned to this secondary worker.'
         required: true
-        type: string                                      # benc-uk/workflow-dispatch triggers 'workflow_dispatch' on the target.
+        type: string
 
 permissions:
-  contents: write # To commit results to its own repository
-  actions: read   # To read artifacts from Account 1 (if PAT_FOR_PRIMARY_ACCOUNT_ARTIFACTS_READ is used correctly)
+  contents: write
+  actions: read
 
 env:
   SECONDARY_ACCOUNT_MAX_PARALLEL: 20
@@ -43,20 +40,15 @@ jobs:
     name: Process Assigned Chunks (Secondary Account)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/pcoder7/spider-puredns-actions:latest # Assuming same container
+      image: ghcr.io/pcoder7/spider-puredns-actions:latest
       credentials:
-        username: pcoder7 # Actor of Account 2
-        password: ${{ secrets.GHCR_TOKEN }} # GHCR_TOKEN for Account 2 if image is private to Account 2
+        username: pcoder7
+        password: ${{ secrets.GHCR_TOKEN }}
     strategy:
       fail-fast: false
       max-parallel: 20
       matrix:
-        # The 'pair' matrix is populated by the 'secondary_matrix_json' from Account 1's client_payload
-        pair: ${{ fromJson(
-                  github.event.inputs.secondary_matrix_json 
-                    && github.event.inputs.secondary_matrix_json
-                    || '[]'
-                ) }}
+        pair: ${{ fromJson(github.event.inputs.secondary_matrix_json && github.event.inputs.secondary_matrix_json || '[]') }}
     steps:
       - name: Display Trigger Payload (Debug)
         run: |
@@ -68,12 +60,9 @@ jobs:
 
       - name: Checkout repository (Account 2's repo)
         uses: actions/checkout@v3
-        # This checks out Account 2's repo, where results will be placed.
 
       - name: Download Full Chunks Package from Primary Account
         env:
-          # This token allows this workflow (Account 2) to read artifacts from Account 1's repo runs.
-          # It must be a PAT from Account 1 with 'actions:read' scope on Account 1's repo.
           GH_TOKEN_PRIMARY_ACCOUNT_READ: ${{ secrets.PAT_FOR_PRIMARY_ACCOUNT_ARTIFACTS_READ }}
           PRIMARY_REPO_OWNER: ${{ github.event.inputs.primary_repo_owner }}
           PRIMARY_REPO_NAME: ${{ github.event.inputs.primary_repo_name }}
@@ -81,17 +70,11 @@ jobs:
           ARTIFACT_NAME_FROM_PRIMARY: ${{ github.event.inputs.chunk_package_artifact_name }}
         shell: bash
         run: |
-          echo "SECONDARY WORKER: Attempting to download artifact '$ARTIFACT_NAME_FROM_PRIMARY' from $PRIMARY_REPO_OWNER/$PRIMARY_REPO_NAME, run ID $PRIMARY_RUN_ID"
-          
-          # Using GitHub CLI to download artifact - ensure gh is in the container or installed
-
-
+          echo "SECONDARY WORKER: Downloading artifact '$ARTIFACT_NAME_FROM_PRIMARY' from $PRIMARY_REPO_OWNER/$PRIMARY_REPO_NAME, run ID $PRIMARY_RUN_ID"
           if ! command -v gh &> /dev/null; then
-            echo "INFO: gh CLI not found. Attempting installation..."
-            # Installation for Debian/Ubuntu-based containers (like many default GitHub runners or common base images)
-            # Adjust if your container is different (e.g., Alpine, CentOS)
+            echo "INFO: gh CLI not found. Installing..."
             apt-get update -qy
-            apt-get install -qy curl # Ensure curl is available for the next step
+            apt-get install -qy curl
             curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
             chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
             echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
@@ -100,33 +83,19 @@ jobs:
             if ! command -v gh &> /dev/null; then
               echo "ERROR: gh CLI installation failed."
               exit 1
-            else
-              echo "INFO: gh CLI successfully installed. Version: $(gh --version)"
             fi
-          else
-            echo "INFO: gh CLI already available. Version: $(gh --version)"
           fi
-          # --- END OF ADDED GH CLI INSTALLATION ---
-      
-          # The PAT needs 'actions:read' scope for the primary repo.
-          echo "$GH_TOKEN_PRIMARY_ACCOUNT_READ" | gh auth login --with-token
 
-          # Construct the full repository path
+          echo "$GH_TOKEN_PRIMARY_ACCOUNT_READ" | gh auth login --with-token
           FULL_PRIMARY_REPO="$PRIMARY_REPO_OWNER/$PRIMARY_REPO_NAME"
-          
-          echo "Downloading artifact: $ARTIFACT_NAME_FROM_PRIMARY from repo: $FULL_PRIMARY_REPO run: $PRIMARY_RUN_ID"
-          gh run download "$PRIMARY_RUN_ID" -R "$FULL_PRIMARY_REPO" -n "$ARTIFACT_NAME_FROM_PRIMARY" --dir . # Download to current dir
-          
-          # Check if the tarball was downloaded
+          gh run download "$PRIMARY_RUN_ID" -R "$FULL_PRIMARY_REPO" -n "$ARTIFACT_NAME_FROM_PRIMARY" --dir .
+
           PACKAGE_FILENAME="$ARTIFACT_NAME_FROM_PRIMARY.tar.gz"
           if [ ! -f "$PACKAGE_FILENAME" ]; then
             echo "ERROR: Failed to download '$PACKAGE_FILENAME'."
-            # Try API fallback if gh cli fails (more complex)
-            # ARTIFACT_API_URL_BASE="${{ github.event.client_payload.primary_github_server_url }}/api/v3/repos/$PRIMARY_REPO_OWNER/$PRIMARY_REPO_NAME/actions/runs/$PRIMARY_RUN_ID/artifacts"
-            # ... curl logic to find and download artifact ...
             exit 1
           fi
-          echo "Downloaded '$PACKAGE_FILENAME' successfully."
+          echo "Downloaded '$PACKAGE_FILENAME'."
 
       - name: Extract Chunks and Resolvers for Secondary
         shell: bash
@@ -135,222 +104,130 @@ jobs:
           echo "SECONDARY WORKER: Extracting $PACKAGE_FILENAME..."
           tar -xzvf "$PACKAGE_FILENAME"
           if [ ! -d "chunks" ] || [ ! -f "resolvers.txt" ]; then
-             echo "ERROR: chunks directory or resolvers.txt not found after extraction!"
-             exit 1
+            echo "ERROR: 'chunks/' or 'resolvers.txt' missing after extraction."
+            exit 1
           fi
-          echo "Extraction complete. 'chunks/' and 'resolvers.txt' should be present."
+          echo "Extraction complete."
           ls -R chunks/
           ls resolvers.txt resolvers-trusted.txt
 
-      - name: Resolve chunk via PureDNS (Secondary Account)
-        id: run_resolve_secondary
+      - name: Set up Go & install httpx + dsieve
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Install httpx and dsieve
+        run: |
+          GO111MODULE=on go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          GO111MODULE=on go install github.com/trickest/dsieve@latest
+          echo "GOBIN=$(go env GOBIN)" >> $GITHUB_ENV
+
+      - name: Run httpx + pre-dsieve on subdomains + final filtering
         shell: bash
         run: |
           DOMAIN=${{ matrix.pair.domain }}
-          CHUNK_FILE_PATH=${{ matrix.pair.chunk }} # Path like "chunks/domainX/chunk_021"
+          CHUNK_FILE_PATH=${{ matrix.pair.chunk }}
+          echo "SECONDARY WORKER: Processing domain '$DOMAIN' with chunk '$CHUNK_FILE_PATH'..."
 
-          echo "SECONDARY ACCOUNT: Resolving chunk '$CHUNK_FILE_PATH' for domain '$DOMAIN'..."
           if [ ! -f "$CHUNK_FILE_PATH" ]; then
-            echo "ERROR: Chunk file '$CHUNK_FILE_PATH' not found locally!"
+            echo "ERROR: Chunk file '$CHUNK_FILE_PATH' not found!"
             exit 1
           fi
 
-          # Results will be placed directly in Account 2's checked-out repository structure
-          OUT_DIR_SECONDARY="results/$DOMAIN" # Store in 'results' dir of Account 2's repo
-          mkdir -p "$OUT_DIR_SECONDARY"
-          CHUNK_BASENAME=$(basename "$CHUNK_FILE_PATH")
-          OUT_FILE="$OUT_DIR_SECONDARY/resolved_${CHUNK_BASENAME}"
-          WILDCARD_FILE="$OUT_DIR_SECONDARY/wildcard_${CHUNK_BASENAME}"
+          # Step A: pre-dsieve on raw subdomain chunk
+          echo "-> Generating parent_domains.txt from raw subdomains..."
+          "$GOBIN/dsieve" -if "$CHUNK_FILE_PATH" -f 2 | sort -u > parent_domains.txt
+          echo "  Parent count: $(wc -l < parent_domains.txt)"
+          head -n 5 parent_domains.txt || true
 
-          puredns resolve "$CHUNK_FILE_PATH" \
-            -r resolvers.txt \
-            --resolvers-trusted resolvers-trusted.txt \
-            --write "$OUT_FILE" \
-            --write-wildcards "$WILDCARD_FILE" \
-            --wildcard-batch 100000 --wildcard-tests 250
-          
-          echo "CHUNK_BASENAME_SECONDARY=$CHUNK_BASENAME" >> $GITHUB_ENV
-          echo "RESOLVED_FILE_PATH=$OUT_FILE" >> $GITHUB_ENV # For potential commit step
-
-      - name: Commit and Push Individual Result ()
-        # This commits after each chunk. For many chunks, this is noisy.
-        # Better to aggregate results and commit once at the end of the job or workflow.
-        # For now, this shows how an individual result could be committed.
-        # To make this work reliably, you'd need a more sophisticated strategy to avoid race conditions if committing from many parallel jobs.
-        # A better approach is for each job to output its result file path, then a final job in this workflow
-        # gathers all those paths and commits them.
-        # For simplicity in this example, let's just show the idea.
-        # It's better to upload these as artifacts within this job and have a final job in THIS workflow do the commit.
-        if: false # Disabled for now, see next job for better commit strategy
-        run: |
-          git config --global user.name "Account2 PureDNS Worker"
-          git config --global user.email "actions-bot@users.noreply.github.com"
-          git add ${{ env.RESOLVED_FILE_PATH }}
-          # Check if wildcard file was created and add it
-          # WILDCARD_FILE_TO_COMMIT="results/${{ matrix.pair.domain }}/wildcard_${{ env.CHUNK_BASENAME_SECONDARY }}"
-          # if [ -f "$WILDCARD_FILE_TO_COMMIT" ]; then git add "$WILDCARD_FILE_TO_COMMIT"; fi
-          
-          # Check if there are changes to commit for this specific file
-          if ! git diff --staged --quiet; then
-            git commit -m "Add PureDNS result for ${{ matrix.pair.domain }} / ${{ env.CHUNK_BASENAME_SECONDARY }}"
-            # git pull --rebase # To avoid conflicts if other jobs pushed
-            git push
-          else
-            echo "No changes to commit for ${{ env.CHUNK_BASENAME_SECONDARY }}."
+          # Step B: Probe with httpx
+          HTTPX_OUT="httpx_output.txt"
+          echo "-> Running httpx (100 threads) against '$CHUNK_FILE_PATH'..."
+          "$GOBIN/httpx" \
+            -l "$CHUNK_FILE_PATH" \
+            -threads 100 \
+            -silent \
+            -no-color \
+            -o "$HTTPX_OUT"
+          if [ ! -s "$HTTPX_OUT" ]; then
+            echo "No live URLs found. Exiting."
+            exit 0
           fi
 
-      - name: Upload Secondary Account Resolved Results (as artifact)
-        # This is a good practice even if committing directly, for backup/audit
+          # Step C: Extract host:port for debugging
+          cut -d'/' -f3 "$HTTPX_OUT" > hosts_with_port.txt
+          echo "  Sample hosts_with_port.txt:"
+          head -n 5 hosts_with_port.txt || true
+
+          # Step D: Filter per parent domain
+          OUTPUT_ROOT="results"
+          mkdir -p "$OUTPUT_ROOT"
+          while read -r parent; do
+            mkdir -p "$OUTPUT_ROOT/$parent"
+            awk -v b="$parent" -F'/' '
+              {
+                host = $3
+                sub(/:.*/, "", host)
+                if (host == b || host ~ ("\\." b "$")) {
+                  print $0
+                }
+              }
+            ' "$HTTPX_OUT" > "$OUTPUT_ROOT/$parent/httpx_result.txt"
+          done < parent_domains.txt
+          echo "-> Split complete for domain '$DOMAIN'."
+
+      - name: Upload Secondary Account httpx+dsieve Results (as artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: secondary_resolved_${{ matrix.pair.domain }}_${{ env.CHUNK_BASENAME_SECONDARY }}
-          path: ${{ env.RESOLVED_FILE_PATH }} # Path to the single resolved file
+          name: secondary_httpx_dsieve_${{ matrix.pair.domain }}_${{ matrix.pair.chunk }}
+          path: results/
           retention-days: 7
 
-  # New job in Account 2's workflow to commit all results from this account's processing
   commit_all_secondary_results:
     name: Commit All Secondary Results
-    needs: process_assigned_chunks_secondary # Run after all parallel chunk processing jobs are done
-    if: always() # Run even if some matrix jobs failed, to commit whatever succeeded
+    needs: process_assigned_chunks_secondary
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (Account 2's repo)
         uses: actions/checkout@v3
         with:
-          # Use a PAT that can write to this repo if GITHUB_TOKEN has issues with concurrent runs
-          # or if you need to attribute commits to a specific bot user.
-          # For most cases, default GITHUB_TOKEN should be fine for committing to its own repo.
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download all 'secondary_resolved_*' artifacts from this workflow run
+      - name: Download all 'secondary_httpx_dsieve_*' artifacts from this workflow run
         uses: actions/download-artifact@v4
         with:
-          pattern: secondary_resolved_* # Download all artifacts matching this pattern
-          path: temp_results # Download into a temporary directory
-          # By default, downloads artifacts from the current workflow run.
+          pattern: secondary_httpx_dsieve_*
+          path: temp_results
 
       - name: Organize and Commit Results
         shell: bash
         run: |
           echo "Organizing downloaded results..."
-          # The downloaded artifacts might be in subdirectories like 'secondary_resolved_domain_chunkname/resolved_chunkname'
-          # We need to move them to the final 'results/domain/' structure.
-          mkdir -p results # Ensure the main results directory exists
+          mkdir -p results
 
-          # Find all 'resolved_*' files in temp_results and move them
-          # This assumes a structure like temp_results/artifact_name/resolved_file.txt
-          # and artifact_name is like secondary_resolved_DOMAIN_CHUNK
-          find temp_results -type f -name "resolved_*" | while read -r filepath; do
-            # Extract domain and chunk_basename from artifact name or file structure
-            # This part is tricky and depends on how artifacts were named and structured.
-            # Let's assume 'filepath' is like 'temp_results/secondary_resolved_thedomain_thechunk/resolved_thechunk'
-            # A simpler way: if artifact path was 'results_primary/${{ matrix.pair.domain }}/resolved_${{ env.CHUNK_BASENAME_PRIMARY }}'
-            # then download-artifact might preserve this structure, or we need to reconstruct it.
-
-            # Assuming download-artifact with pattern creates subdirs named after the artifact:
-            # e.g. temp_results/secondary_resolved_example.com_chunk_001/resolved_chunk_001
-            # We need to parse the domain from the directory name.
-            
-            basedir=$(dirname "$filepath") # e.g., temp_results/secondary_resolved_example.com_chunk_001
-            artifact_name_part=$(basename "$basedir") # e.g., secondary_resolved_example.com_chunk_001
-            
-            # Try to parse domain (this is a heuristic, adjust if artifact naming changes)
-            # Remove "secondary_resolved_" prefix and "_chunk_XXX" suffix
-            # This is fragile; better to pass domain explicitly or store results in a way that preserves domain.
-            # For now, let's assume results are already placed in a 'results/DOMAIN/resolved_chunk' structure by the previous job
-            # and we just need to download them into the correct final location if artifacts didn't preserve it.
-
-            # If the previous jobs placed files in "results/DOMAIN/resolved_CHUNK" and we uploaded that path:
-            # Artifact "secondary_resolved_DOMAIN_CHUNK" with path "results/DOMAIN/resolved_CHUNK"
-            # download-artifact to "temp_results" might create:
-            # temp_results/results/DOMAIN/resolved_CHUNK
-            # So we can copy from temp_results/results/* to ./results/
-            
-            if [ -d "temp_results/results" ]; then
-                echo "Copying from temp_results/results to ./results"
-                # Use rsync or cp to merge. Ensure target 'results' dir exists in checkout.
-                cp -R T temp_results/results/* ./results/ || echo "No results to copy or cp failed"
-            else
-                echo "No 'temp_results/results' directory found. Check artifact structure."
-                # Fallback: Manually move files if structure is flat
-                # find temp_results -type f -name "resolved_*" -exec mv {} results/ \; # Too simple, loses domain structure
-            fi
-            # Breaking out of loop as cp -R should handle all.
-            break 
-          done
-          
-          # If results are not in subdirectories by domain, this needs more complex logic.
-          # The simplest is if individual `upload-artifact` steps used paths like:
-          # `results/${{ matrix.pair.domain }}/resolved_${{ env.CHUNK_BASENAME_SECONDARY }}`
-          # And `download-artifact` to `.` then `results` dir would be populated correctly.
-          # Let's assume download-artifact to `.` populates `results/DOMAIN/file` correctly.
-          # If download path was `results`, then `results/results/DOMAIN/file` - adjust accordingly.
-
-          # Assuming after download-artifact to a temp dir, we copy them properly:
-          # The 'process_assigned_chunks_secondary' job creates files in 'results/DOMAIN/resolved_BASENAME'
-          # So, the artifacts contain this structure.
-          # When downloaded, they will be in 'temp_results/artifact_name/results/DOMAIN/resolved_BASENAME'
-          # OR if path in upload was just 'results/....', then 'temp_results/artifact_name/resolved_BASENAME'
-
-          # Let's simplify: assume 'download-artifact' (if path not specified) unpacks to current dir.
-          # If 'process_assigned_chunks_secondary' step 'Upload Secondary Account Resolved Results' used path:
-          #   results/${{ matrix.pair.domain }}/resolved_${{ env.CHUNK_BASENAME_SECONDARY }}
-          # Then download-artifact (to '.') will create that structure locally.
-          # So, this 'commit_all_secondary_results' job might not need to download artifacts if the files
-          # are already in the workspace from the previous 'process_assigned_chunks_secondary' matrix runs.
-          # However, 'needs' creates a clean workspace. So download is necessary.
-
-          # Corrected artifact organization:
-          # The previous jobs save to results/DOMAIN/file.ext
-          # Artifacts are named secondary_resolved_DOMAIN_CHUNK
-          # Path for artifact is results/DOMAIN/resolved_CHUNK
-          # Download-artifact downloads "secondary_resolved_DOMAIN_CHUNK" as a directory,
-          # inside which is "results/DOMAIN/resolved_CHUNK"
-          # We need to move from "temp_results/secondary_resolved_DOMAIN_CHUNK/results/DOMAIN/resolved_CHUNK"
-          # to "./results/DOMAIN/resolved_CHUNK"
-
-          echo "Organizing downloaded artifacts into final 'results' directory..."
-          mkdir -p results # Final destination
-          for artifact_dir in temp_results/secondary_resolved_*; do
+          for artifact_dir in temp_results/secondary_httpx_dsieve_*; do
             if [ -d "$artifact_dir" ]; then
-              # Content of artifact_dir is expected to be like results/DOMAIN/resolved_CHUNK
-              # Or just the file itself if path in upload was just the file.
-              # If path was "results/${{ matrix.pair.domain }}/resolved_${{ env.CHUNK_BASENAME_SECONDARY }}"
-              # Then the file is directly inside $artifact_dir
-              
-              # Find the resolved file within the artifact directory
-              RESOLVED_FILE_IN_ARTIFACT=$(find "$artifact_dir" -type f -name "resolved_*" -print -quit)
-              if [ -n "$RESOLVED_FILE_IN_ARTIFACT" ]; then
-                # Create a simple target structure based on artifact name (crude)
-                # e.g. secondary_resolved_example.com_chunk001 -> results/example.com/resolved_chunk001
-                PARSED_NAME=$(basename "$artifact_dir" | sed 's/secondary_resolved_//') # example.com_chunk001
-                DOMAIN_PART=$(echo "$PARSED_NAME" | rev | cut -d'_' -f2- | rev) # example.com
-                FILE_BASENAME_PART=$(echo "$PARSED_NAME" | rev | cut -d'_' -f1 | rev) # chunk001
-                
-                TARGET_DIR="results/$DOMAIN_PART"
-                mkdir -p "$TARGET_DIR"
-                cp "$RESOLVED_FILE_IN_ARTIFACT" "$TARGET_DIR/resolved_$FILE_BASENAME_PART"
-                echo "Moved $RESOLVED_FILE_IN_ARTIFACT to $TARGET_DIR/resolved_$FILE_BASENAME_PART"
+              if [ -d "$artifact_dir/results" ]; then
+                cp -R "$artifact_dir/results/"* ./results/ || echo "No nested results in $artifact_dir"
+              else
+                echo "No 'results/' directory in $artifact_dir"
               fi
             fi
           done
 
           git config --global user.name "Account2 PureDNS Bot"
-          git config --global user.email "actions-bot@users.noreply.github.com" # Or your bot email
+          git config --global user.email "actions-bot@users.noreply.github.com"
 
-          # Check if results directory exists and has content
           if [ -d "results" ] && [ "$(ls -A results)" ]; then
             git add results/
-            # Check if there are any changes staged for commit
             if ! git diff --staged --quiet; then
               echo "Committing results..."
-              git commit -m "Add/Update PureDNS results from Secondary Account (Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"
-              # git pull --rebase # Good practice before push, especially if branch is active
+              git commit -m "Add/Update httpx+dsieve results from Secondary Account (Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"
               git push
-              echo "Results committed and pushed."
             else
-              echo "No new changes in 'results/' directory to commit."
+              echo "No new changes in 'results/' to commit."
             fi
           else
-            echo "Results directory is empty or does not exist. Nothing to commit."
+            echo "Results directory is empty or missing. Nothing to commit."
           fi
