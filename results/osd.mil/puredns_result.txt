@@ -1,0 +1,4 @@
+www.med.osd.mil
+mail.osd.mil
+access.osd.mil
+test.med.osd.mil

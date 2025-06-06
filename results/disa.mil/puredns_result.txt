@@ -1,0 +1,11 @@
+builds.okc.disa.mil
+storage.okc.disa.mil
+public.okc.disa.mil
+legacy.okc.disa.mil
+cms.disa.mil
+ads.disa.mil
+monitor.disa.mil
+internal.okc.disa.mil
+developer.okc.disa.mil
+web.disa.mil
+www.okc.disa.mil

@@ -1,0 +1,3 @@
+test.pentagon.mil
+forum.army.pentagon.mil
+test.army.pentagon.mil

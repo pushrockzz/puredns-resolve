@@ -1,0 +1,9 @@
+www.navy.mil
+my.navy.mil
+ldap.med.navy.mil
+oauth.nswc.navy.mil
+data.navy.mil
+login.navy.mil
+ldap.spawar.navy.mil
+admin.med.navy.mil
+www.med.navy.mil
