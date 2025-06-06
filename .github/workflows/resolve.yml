@@ -287,16 +287,18 @@ jobs:
           git config --global user.email "actions-bot@users.noreply.github.com"  
     
           # Clone the private store-recon repo  
-          TMP_DIR="$(mktemp -d)"  
-          echo "Cloning store-recon into $TMP_DIR"  
-          git clone "https://x-access-token:${STORE_RECON_PAT}@github.com/${USERNAME}/${STORE}.git" "$TMP_DIR"  
-          cd "$TMP_DIR" || exit 1  
-    
-          # Ensure results/ exists in store-recon  
           mkdir -p results  
+          find temp_results -type f -name "puredns_result.txt" | while read -r filepath; do  
+            parent="$(basename "$(dirname "$filepath")")"  
+            mkdir -p "results/$parent"  
+            cat "$filepath" | anew -q "results/$parent/puredns_result.txt"  
+          done || true  
     
-          # Copy our new results into the clone’s results/ folder  
-          rsync -a --remove-source-files "${GITHUB_WORKSPACE}/results/" "results/"  
+          if [ ! -d "results" ] || [ -z "$(ls -A results)" ]; then  
+            echo "Results directory is empty or missing. Nothing to push."  
+            exit 0  
+          fi  
+    
     
           # retry up to 5 times to handle concurrent updates  
           for i in {1..5}; do  
