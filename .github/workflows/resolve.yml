@@ -42,7 +42,7 @@ jobs:
     container:
       image: ghcr.io/pcoder7/spider-puredns-actions:latest
       credentials:
-        username: pcoder7
+        username: ${{ secrets.GHCR_USER }}
         password: ${{ secrets.GHCR_TOKEN }}
     strategy:
       fail-fast: false
