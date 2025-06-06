@@ -300,10 +300,6 @@ jobs:
             git checkout main  
             git pull --rebase origin main  
 
-            # Wipe and re-create the clone’s results/ so we start fresh  
-            rm -rf results  
-            mkdir -p results  
-
             WORKSPACE_RESULTS="${GITHUB_WORKSPACE}/results"  
             find "$WORKSPACE_RESULTS" -type f -name "puredns_result.txt" | while read -r filepath; do  
               rel="${filepath#"$WORKSPACE_RESULTS/"}"  
