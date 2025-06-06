@@ -264,7 +264,7 @@ jobs:
         shell: bash
         run: |
           echo "Organizing downloaded results..."
-          mkdir -p results
+          git config --global --add safe.directory "$(pwd)"
 
           # Find every puredns_result.txt inside each downloaded artifact and copy to ./results/<parent>/
           mkdir -p results
