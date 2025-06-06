@@ -154,8 +154,8 @@ jobs:
             --resolvers-trusted resolvers-trusted.txt \
             --write "$PUREDNS_OUT" \
             --write-wildcards "$WILDCARD_FILE" \
-            --wildcard-batch 100000 --wildcard-tests 250 \
-            -o "$PUREDNS_OUT"
+            --wildcard-batch 100000 --wildcard-tests 250 
+            
 
           if [ ! -s "$PUREDNS_OUT" ]; then
             echo "No live URLs found. Exiting."
