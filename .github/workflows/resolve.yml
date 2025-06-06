@@ -246,7 +246,7 @@ jobs:
     container:
       image: ghcr.io/pcoder7/spider-puredns-actions:latest
       credentials:
-        username: pcoder7
+        username: ${{ secrets.GHCR_USER }}
         password: ${{ secrets.GHCR_TOKEN }}        
     steps:
       - name: Checkout repository (Account 2's repo)
@@ -264,6 +264,8 @@ jobs:
         shell: bash  
         env:  
           STORE_RECON_PAT: ${{ secrets.STORE_RECON_PAT }}  
+          STORE: ${{ secrets.STORE }}
+          USERNAME: ${{ secrets.USERNAME }}
         run: |  
           echo "Organizing downloaded results..."  
           git config --global --add safe.directory "$(pwd)"  
@@ -287,7 +289,7 @@ jobs:
           # Clone the private store-recon repo  
           TMP_DIR="$(mktemp -d)"  
           echo "Cloning store-recon into $TMP_DIR"  
-          git clone "https://x-access-token:${STORE_RECON_PAT}@github.com/pushrockzz/store-recon.git" "$TMP_DIR"  
+          git clone "https://x-access-token:${STORE_RECON_PAT}@github.com/${USERNAME}/${STORE}.git" "$TMP_DIR"  
           cd "$TMP_DIR" || exit 1  
     
           # Ensure results/ exists in store-recon  
