@@ -243,6 +243,11 @@ jobs:
     needs: process_assigned_chunks_secondary
     if: always()
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/pcoder7/spider-puredns-actions:latest
+      credentials:
+        username: pcoder7
+        password: ${{ secrets.GHCR_TOKEN }}        
     steps:
       - name: Checkout repository (Account 2's repo)
         uses: actions/checkout@v3
