@@ -276,6 +276,7 @@ jobs:
             parent="$(basename "$(dirname "$filepath")")"  
             mkdir -p "results/$parent"  
             cat "$filepath" | anew -q "results/$parent/puredns_result.txt"  
+            echo "WORKFLOW RUN: 'results/$parent/puredns_result.txt' contains $(wc -l < "results/$parent/puredns_result.txt") valid domains for parent $parent."
           done || true  
 
           if [ ! -d "results" ] || [ -z "$(ls -A results)" ]; then  
