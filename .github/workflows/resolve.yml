@@ -260,48 +260,65 @@ jobs:
           pattern: secondary_puredns_dsieve_*
           path: temp_results
       
-      - name: Organize and Commit Results 
-        shell: bash
-        run: |
-          echo "Organizing downloaded results..."
-          git config --global --add safe.directory "$(pwd)"
+      - name: Organize and Push Results to store-recon  
+        shell: bash  
+        env:  
+          STORE_RECON_PAT: ${{ secrets.STORE_RECON_PAT }}  
+        run: |  
+          echo "Organizing downloaded results..."  
+          git config --global --add safe.directory "$(pwd)"  
     
-          # Find every puredns_result.txt inside each downloaded artifact and merge into ./results/<parent>/
-          mkdir -p results
-          find temp_results -type f -name "puredns_result.txt" | while read -r filepath; do
-            parent="$(basename "$(dirname "$filepath")")"
-            mkdir -p "results/$parent"
-            cat "$filepath" | anew -q "results/$parent/puredns_result.txt"
-          done || true
+          # Merge downloaded chunk outputs into ./results/<parent>/
+          mkdir -p results  
+          find temp_results -type f -name "puredns_result.txt" | while read -r filepath; do  
+            parent="$(basename "$(dirname "$filepath")")"  
+            mkdir -p "results/$parent"  
+            cat "$filepath" | anew -q "results/$parent/puredns_result.txt"  
+          done || true  
     
-          git config --global user.name "Account2 PureDNS Bot"
-          git config --global user.email "actions-bot@users.noreply.github.com"
+          if [ ! -d "results" ] || [ -z "$(ls -A results)" ]; then  
+            echo "Results directory is empty or missing. Nothing to push."  
+            exit 0  
+          fi  
     
-          if [ -d "results" ] && [ "$(ls -A results)" ]; then
-            # retry up to 5 times to handle concurrent updates
-            for i in {1..5}; do
-              git fetch origin main
-              git checkout main
-              git pull --rebase origin main
+          git config --global user.name "Account2 PureDNS Bot"  
+          git config --global user.email "actions-bot@users.noreply.github.com"  
     
-              git add results/
-              if git diff --cached --quiet; then
-                echo "No changes to commit."
-                exit 0
-              fi
+          # Clone the private store-recon repo  
+          TMP_DIR="$(mktemp -d)"  
+          echo "Cloning store-recon into $TMP_DIR"  
+          git clone "https://x-access-token:${STORE_RECON_PAT}@github.com/pushrockzz/store-recon.git" "$TMP_DIR"  
+          cd "$TMP_DIR" || exit 1  
     
-              git commit -m "Add/Update puredns+dsieve results from Secondary Account (Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"
-              if git push origin main; then
-                echo "Pushed successfully on attempt #$i."
-                exit 0
-              else
-                echo "Push failed on attempt #$i, retrying..."
-                git reset --hard origin/main
-              fi
-            done
-            echo "ERROR: Could not push results after 5 attempts."
-            exit 1
-          else
-            echo "Results directory is empty or missing. Nothing to commit."
-          fi          
+          # Ensure results/ exists in store-recon  
+          mkdir -p results  
+    
+          # Copy our new results into the clone’s results/ folder  
+          rsync -a --remove-source-files "${GITHUB_WORKSPACE}/results/" "results/"  
+    
+          # retry up to 5 times to handle concurrent updates  
+          for i in {1..5}; do  
+            git fetch origin main  
+            git checkout main  
+            git pull --rebase origin main  
+    
+            git add results/  
+            if git diff --cached --quiet; then  
+              echo "No changes to commit in store-recon."  
+              exit 0  
+            fi  
+    
+            git commit -m "Add/Update puredns+dsieve results (Primary Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"  
+            if git push origin main; then  
+              echo "Pushed to store-recon successfully on attempt #$i."  
+              exit 0  
+            else  
+              echo "Push to store-recon failed on attempt #$i, retrying..."  
+              git reset --hard origin/main  
+            fi  
+          done  
+    
+          echo "ERROR: Could not push results to store-recon after 5 attempts."  
+          exit 1  
+       
  
