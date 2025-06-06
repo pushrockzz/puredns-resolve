@@ -157,30 +157,70 @@ jobs:
             --wildcard-batch 100000 --wildcard-tests 250 
             
 
+          puredns_exit=$?
+          if [ $puredns_exit -ne 0 ]; then
+            echo "ERROR: puredns returned exit code $puredns_exit. Aborting chunk."
+            exit 1
+          fi
+
+          # Always create results/ so upload-artifact sees at least an empty folder
+          OUTPUT_ROOT="results"
+          mkdir -p "$OUTPUT_ROOT"
+
           if [ ! -s "$PUREDNS_OUT" ]; then
-            echo "No live URLs found. Exiting."
+            echo "No live hostnames found in this chunk. Leaving results/ empty."
             exit 0
           fi
 
-          # Step C: Extract host:port for debugging
-          cut -d'/' -f3 "$PUREDNS_OUT" > hosts_with_port.txt
-          echo "  Sample hosts_with_port.txt:"
-          head -n 5 hosts_with_port.txt || true
+          echo "-> Sample of puredns_output.txt (first 5 lines):"
+          head -n 5 "$PUREDNS_OUT" || true
 
-          # Step D: Filter per parent domain
-          OUTPUT_ROOT="results"
-          mkdir -p "$OUTPUT_ROOT"
+          # ───────────────────────────────────────────────────────────
+          # Step C+D: For each parent domain, filter matching hostnames
+          # ───────────────────────────────────────────────────────────
+          echo "DEBUG: Starting per-parent filtering with AWK (domain-only mode)"
           while read -r parent; do
-            mkdir -p "$OUTPUT_ROOT/$parent"
-            awk -v b="$parent" -F'/' '
-              {
-                host = $3
-                sub(/:.*/, "", host)
-                if (host == b || host ~ ("\\." b "$")) {
-                  print $0
-                }
+            # Strip any carriage returns or trailing whitespace
+            clean_parent=$(printf '%s' "$parent" | tr -d '\r' | xargs)
+            if [ -z "$clean_parent" ]; then
+              echo "DEBUG: Skipping empty parent line"
+              continue
+            fi
+
+            echo "DEBUG: Processing parent => [[$clean_parent]]"
+            mkdir -p "$OUTPUT_ROOT/$clean_parent"
+            outfile="$OUTPUT_ROOT/$clean_parent/puredns_result.txt"
+
+            echo "DEBUG: AWK filtering host==$clean_parent or subdomain of $clean_parent from $PUREDNS_OUT into $outfile"
+
+            awk -v b="$clean_parent" '
+            {
+              host = $1
+              if (host == b || host ~ ("\\." b "$")) {
+                print $0
               }
-            ' "$PUREDNS_OUT" > "$OUTPUT_ROOT/$parent/puredns_result.txt"
+            }
+            ' "$PUREDNS_OUT" > "$outfile" 2>/tmp/awk_error.log
+            awk_exit=$?
+            if [ $awk_exit -ne 0 ]; then
+              echo "ERROR: AWK exited with code $awk_exit for parent='$clean_parent'."
+              echo "DEBUG: Contents of /tmp/awk_error.log:"
+              cat /tmp/awk_error.log || true
+            fi
+
+            if [ -f "$outfile" ]; then
+              lines_written=$(wc -l < "$outfile")
+              echo "DEBUG: '$outfile' contains $lines_written line(s)."
+              if [ $lines_written -gt 0 ]; then
+                echo "DEBUG: Sample lines from '$outfile':"
+                head -n 3 "$outfile" || true
+              else
+                echo "DEBUG: '$outfile' is empty."
+              fi
+            else
+              echo "DEBUG: '$outfile' was not created."
+            fi
+
           done < parent_domains.txt
           echo "-> Split complete for domain '$DOMAIN'."
           mkdir -p results
