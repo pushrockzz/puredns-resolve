@@ -266,7 +266,7 @@ jobs:
           find temp_results -type f -name "puredns_result.txt" | while read -r filepath; do
             parent="$(basename "$(dirname "$filepath")")"
             mkdir -p "results/$parent"
-            cp "$filepath" "results/$parent/puredns_result.txt"
+            cat "$filepath" | anew -q "results/$parent/puredns_result.txt"
           done || true
 
           git config --global user.name "Account2 PureDNS Bot"
