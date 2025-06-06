@@ -1,0 +1,13 @@
+ccc-cert.betfair.com
+connect2.betfair.com
+connect1.betfair.com
+crl.betfair.com
+bts.lb.betfair.com
+clientmetrics.lb.betfair.com
+ccc.lb.betfair.com
+cache.ads.betfair.com
+docs.developer.betfair.com
+cashout-exchange.lb.betfair.com
+ccc.nxt.betfair.com
+dadbf.lb.betfair.com
+cache.promotions.betfair.com
