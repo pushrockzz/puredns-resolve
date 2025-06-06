@@ -259,33 +259,49 @@ jobs:
         with:
           pattern: secondary_puredns_dsieve_*
           path: temp_results
-
-      - name: Organize and Commit Results
+      
+      - name: Organize and Commit Results 
         shell: bash
         run: |
           echo "Organizing downloaded results..."
           git config --global --add safe.directory "$(pwd)"
-
-          # Find every puredns_result.txt inside each downloaded artifact and copy to ./results/<parent>/
+    
+          # Find every puredns_result.txt inside each downloaded artifact and merge into ./results/<parent>/
           mkdir -p results
           find temp_results -type f -name "puredns_result.txt" | while read -r filepath; do
             parent="$(basename "$(dirname "$filepath")")"
             mkdir -p "results/$parent"
             cat "$filepath" | anew -q "results/$parent/puredns_result.txt"
           done || true
-
+    
           git config --global user.name "Account2 PureDNS Bot"
           git config --global user.email "actions-bot@users.noreply.github.com"
-
+    
           if [ -d "results" ] && [ "$(ls -A results)" ]; then
-            git add results/
-            if ! git diff --staged --quiet; then
-              echo "Committing results..."
+            # retry up to 5 times to handle concurrent updates
+            for i in {1..5}; do
+              git fetch origin main
+              git checkout main
+              git pull --rebase origin main
+    
+              git add results/
+              if git diff --cached --quiet; then
+                echo "No changes to commit."
+                exit 0
+              fi
+    
               git commit -m "Add/Update puredns+dsieve results from Secondary Account (Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"
-              git push
-            else
-              echo "No new changes in 'results/' to commit."
-            fi
+              if git push origin main; then
+                echo "Pushed successfully on attempt #$i."
+                exit 0
+              else
+                echo "Push failed on attempt #$i, retrying..."
+                git reset --hard origin/main
+              fi
+            done
+            echo "ERROR: Could not push results after 5 attempts."
+            exit 1
           else
             echo "Results directory is empty or missing. Nothing to commit."
-          fi
+          fi          
+ 
