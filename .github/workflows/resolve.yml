@@ -114,11 +114,7 @@ jobs:
           ls -R chunks/
           ls resolvers.txt resolvers-trusted.txt
       
-      - name: Set up Go + dsieve
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.23'
-     
+    
       - name: Install puredns and dsieve
         run: |
           if command -v dsieve &> /dev/null; then
@@ -127,7 +123,22 @@ jobs:
             echo "Installing dsieve..."
             go install github.com/trickest/dsieve@latest
           fi
+      
+      - name: Fetch wordlists
+        shell: bash
+        run: |
 
+          if [ ! -f resolvers.txt ]; then
+              wget -qO resolvers.txt \
+              https://raw.githubusercontent.com/rix4uni/resolvers/refs/heads/main/resolvers.txt
+              echo "resolvers.txt is downloaded"
+          fi
+          if [ ! -f resolvers-trusted.txt ]; then
+              wget -qO resolvers-trusted.txt \
+              https://raw.githubusercontent.com/and0x00/resolvers.txt/refs/heads/main/resolvers.txt
+              echo "resolvers-trusted.txt is downloaded"
+          fi       
+      
       - name: Run puredns + pre-dsieve on subdomains + final filtering
         shell: bash
         run: |
