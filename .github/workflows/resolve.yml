@@ -161,6 +161,7 @@ jobs:
           PUREDNS_OUT="puredns_output.txt"
           echo "-> Running Puredns (100 threads) against '$CHUNK_FILE_PATH'..."
           puredns resolve "$CHUNK_FILE_PATH" \
+            -q \
             -r resolvers.txt \
             --resolvers-trusted resolvers-trusted.txt \
             --rate-limit 4000 \
