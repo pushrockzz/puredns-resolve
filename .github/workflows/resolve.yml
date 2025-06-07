@@ -167,7 +167,7 @@ jobs:
             --rate-limit-trusted 100 \
             --write "$PUREDNS_OUT" \
             --write-wildcards "$WILDCARD_FILE" \
-            --wildcard-batch 100000 --wildcard-tests 250 
+            --wildcard-batch 1000000 --wildcard-tests 400 
             
 
           puredns_exit=$?
