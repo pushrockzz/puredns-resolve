@@ -163,6 +163,8 @@ jobs:
           puredns resolve "$CHUNK_FILE_PATH" \
             -r resolvers.txt \
             --resolvers-trusted resolvers-trusted.txt \
+            --rate-limit 4000 \
+            --rate-limit-trusted 100 \
             --write "$PUREDNS_OUT" \
             --write-wildcards "$WILDCARD_FILE" \
             --wildcard-batch 100000 --wildcard-tests 250 
