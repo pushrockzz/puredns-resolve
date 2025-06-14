@@ -38,7 +38,7 @@ env:
 jobs:
   process_assigned_chunks_secondary:
     name: Process Assigned Chunks (Secondary Account)
-    if: github.event.inputs.secondary_matrix_json != '' && github.event.inputs.secondary_matrix_json != '[]'
+    #if: github.event.inputs.secondary_matrix_json != '' && github.event.inputs.secondary_matrix_json != '[]'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/pcoder7/spider-puredns-actions:latest
