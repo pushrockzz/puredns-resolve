@@ -52,7 +52,6 @@ jobs:
         pair: ${{ fromJson(github.event.inputs.secondary_matrix_json && github.event.inputs.secondary_matrix_json || '[]') }}
     steps:
 
-          
       - name: Display Trigger Payload (Debug)
         run: |
           echo "SECONDARY WORKER: Received payload:"
@@ -99,8 +98,7 @@ jobs:
             exit 1
           fi
           echo "Downloaded '$PACKAGE_FILENAME'."
-    
-       
+
       - name: Extract Chunks and Resolvers for Secondary
         shell: bash
         run: |
@@ -114,9 +112,8 @@ jobs:
           echo "Extraction complete."
           ls -R chunks/
           ls resolvers.txt resolvers-trusted.txt
-      
-    
-      - name: Install puredns and dsieve
+
+      - name: Install dsieve
         run: |
           if command -v dsieve &> /dev/null; then
             echo "dsieve is already installed"
@@ -124,7 +121,49 @@ jobs:
             echo "Installing dsieve..."
             go install github.com/trickest/dsieve@latest
           fi
-      
+
+      - name: Install Tools
+        run: |
+          # Installing smap
+          if ! command -v smap >/dev/null; then
+            echo "Installing smap…"
+            go install -v github.com/s0md3v/smap/cmd/smap@latest
+          else
+            echo "smap already in cache"
+          fi
+          # Installing inscope
+          if ! command -v inscope >/dev/null; then
+            echo "Installing inscope…"
+            go install -v github.com/tomnomnom/hacks/inscope@latest
+          else
+            echo "inscope already in cache"
+          fi
+
+          if ! command -v anew >/dev/null; then
+            echo "Installing anew…"
+            go install -v github.com/tomnomnom/anew@latest
+          else
+            echo "anew already in cache"
+          fi
+
+          if ! command -v cut-cdn >/dev/null; then
+            echo "Installing cut-cdn…"
+            go install github.com/ImAyrix/cut-cdn@latest
+          else
+            echo "cut-cdn already in cache"
+          fi
+
+          if ! command -v naabu >/dev/null; then
+            echo "Installing naabu…"
+            go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+          else
+            echo "naabu already in cache"
+          fi
+
+          pip3 install --no-cache-dir ipaddress
+
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
       - name: Fetch wordlists
         shell: bash
         run: |
@@ -138,209 +177,304 @@ jobs:
               wget -qO resolvers-trusted.txt \
               https://raw.githubusercontent.com/and0x00/resolvers.txt/refs/heads/main/resolvers.txt
               echo "resolvers-trusted.txt is downloaded"
-          fi       
-      
+          fi
+
       - name: Run puredns + pre-dsieve on subdomains + final filtering
         shell: bash
         run: |
-          DOMAIN=${{ matrix.pair.domain }}
-          CHUNK_FILE_PATH=${{ matrix.pair.chunk }}
-          echo "SECONDARY WORKER: Processing domain '$DOMAIN' with chunk '$CHUNK_FILE_PATH'..."
+          set -euo pipefail
+          trap '' SIGPIPE
 
+          CHUNK_FILE_PATH=${{ matrix.pair.chunk }}
+          echo "Processing chunk '$CHUNK_FILE_PATH'..."
           if [ ! -f "$CHUNK_FILE_PATH" ]; then
             echo "ERROR: Chunk file '$CHUNK_FILE_PATH' not found!"
             exit 1
           fi
 
-          # Step A: pre-dsieve on raw subdomain chunk
-          echo "-> Generating parent_domains.txt from raw subdomains..."
-          dsieve -if "$CHUNK_FILE_PATH" -f 2 | sort -u > parent_domains.txt
-          echo "  Parent count: $(wc -l < parent_domains.txt)"
-          head -n 5 parent_domains.txt || true
+          # ====================================================================
+          # STAGE 1: PUREDNS RESOLUTION (Naming now matches reference)
+          # ====================================================================
+          # Define filenames to match the reference workflow
+          PUREDNS_FILE="puredns_file.txt"
+          MASSDNS="massdns.txt"
+          MASSDNS_FILE="massdns_file.txt"
+          PARENT_DOMAINS_SCOPE="parent_domains.scope" # This is the one necessary new variable
 
-          # Step B: Probe with puredns
-          PUREDNS_OUT="puredns_output.txt"
-          echo "-> Running Puredns (100 threads) against '$CHUNK_FILE_PATH'..."
+          echo "-> Generating a dynamic scope file from the raw chunk..."
+          dsieve -if "$CHUNK_FILE_PATH" -f 2 | sort -u > "$PARENT_DOMAINS_SCOPE"
+          echo "  -> Scope for this chunk contains $(wc -l < "$PARENT_DOMAINS_SCOPE") parent domains."
+
+          echo "-> Running puredns..."
           puredns resolve "$CHUNK_FILE_PATH" \
-            -q \
             -r resolvers.txt \
-            --resolvers-trusted resolvers-trusted.txt \
-            --rate-limit 4000 \
-            --rate-limit-trusted 100 \
-            --write "$PUREDNS_OUT" \
-            --write-wildcards "$WILDCARD_FILE" \
-            --wildcard-batch 1000000 --wildcard-tests 400 
-            
+            --rate-limit 3000 \
+            --skip-validation \
+            --skip-wildcard-filter \
+            --write "$PUREDNS_FILE" \
+            --write-massdns "$MASSDNS" \
+            --quiet >/dev/null 2>&1
 
-          puredns_exit=$?
-          if [ $puredns_exit -ne 0 ]; then
-            echo "ERROR: puredns returned exit code $puredns_exit. Aborting chunk."
-            exit 1
+          if [ ! -s "$MASSDNS" ]; then
+              echo "INFO: Puredns found no resolvable hosts in this chunk. Exiting."
+              mkdir -p results
+              exit 0
           fi
 
-          # Always create results/ so upload-artifact sees at least an empty folder
+          # ====================================================================
+          # STAGE 2: CLEAN AND FILTER MASS_DNS DATA (Logic and Naming now match reference)
+          # ====================================================================
+          TMP_CLEANMASSDNS=$(mktemp)
+
+          echo "-> Cleaning raw massdns output ('$MASSDNS')..."
+          awk 'NF { sub(/\.$/,"",$1); print }' "$MASSDNS" > "$TMP_CLEANMASSDNS"
+
+          echo "-> Filtering against the dynamic scope to create '$MASSDNS_FILE'..."
+          awk '
+          {gsub(/\r$/,"");sub(/^[ \t]+/,"");sub(/[ \t]+$/,"")}
+          FNR==NR{if($0)patterns[++c]=$0;next}
+          !setup{regex="";for(i=1;i<=c;i++){regex=regex (i>1?"|":"") "("patterns[i]")"};if(regex=="")regex="^\b$";setup=1}
+          $2=="A" && $1~regex
+          ' "$PARENT_DOMAINS_SCOPE" "$TMP_CLEANMASSDNS" | anew -q "$MASSDNS_FILE"
+          echo "  -> Found $(wc -l < "$MASSDNS_FILE") in-scope A records."
+
+          # ====================================================================
+          # STAGE 3: MAP SUBDOMAINS TO PORTS (Logic and Naming now match reference)
+          # ====================================================================
+          OUTPUT="subdomain_ports.txt"
+          SMAP_FILE="smap.txt"
+          TMP_IP2SUB=$(mktemp)
+          TMP_IP_ONLY=$(mktemp)
+          TMP_NONCDN=$(mktemp)
+          TMP_CDN=$(mktemp)
+          TMP_SMAP_NONCDN=$(mktemp)
+          TMP_RUSTSCAN=$(mktemp)
+
+          echo "-> Extracting IPs from '$MASSDNS_FILE'..."
+          awk '{ print $3, $1 }' "$MASSDNS_FILE" | sort -k1,1 > "$TMP_IP2SUB"
+          cut -d' ' -f1 "$TMP_IP2SUB" | sort -u > "$TMP_IP_ONLY"
+
+          echo "-> Filtering out CDN IPs..."
+          cat "$TMP_IP_ONLY" | cut-cdn -ua -t 50 -silent -o "$TMP_NONCDN"
+          cat "$TMP_IP_ONLY" | anew -d "$TMP_NONCDN" > "$TMP_CDN"
+
+          echo "-> Scanning non-CDN IPs for ports 80, 443..."
+          smap -iL "$TMP_NONCDN" -oP "$TMP_SMAP_NONCDN" || true
+          rustscan -a "$TMP_NONCDN" -p 70,80,81,82,83,84,85,88,443,888,1234,1311,2002,3000,3128,4443,5000,5222,5269,5800,7070,8000,8001,8002,8003,8004,8006,8008,8009,8010,8080,8081,8082,8083,8084,8085,8088,8181,8443,8880,8887,8888,9000,9001,9080,9090,9999,10000,10001,50000 --no-banner -t 1000 --tries 1 -u 20000 --scan-order "Random" -b 100 --greppable --accessible > "$TMP_RUSTSCAN" || true
+          cat "$TMP_RUSTSCAN" | awk -F ' -> ' '{ gsub(/[\[\]]/, "", $2); n = split($2, p, ","); for(i=1;i<=n;i++) print $1 ":" p[i] }' | anew -q "$TMP_SMAP_NONCDN"
+          cat "$TMP_RUSTSCAN" | awk -F ' -> ' '{ gsub(/[\[\]]/, "", $2); n = split($2, p, ","); for(i=1;i<=n;i++) print $1 ":" p[i] }'
+
+          cat "$TMP_SMAP_NONCDN" "$TMP_CDN" | sort -u > "$SMAP_FILE"
+
+          echo "-> Showing you SMAP_FILE---------"
+          cat "$SMAP_FILE"
+
+          echo "-> Joining IPs/Ports to create '$OUTPUT'..."
+          awk -F: '
+            NF==2 { print $1, $2 }
+            NF==1 { print $1, ""  }
+          ' "$SMAP_FILE" \
+            | sort -k1,1 \
+            | join - "$TMP_IP2SUB" \
+            | {
+              awk '
+                NF >= 2 {
+                  if (NF == 3 && $2 ~ /^[0-9]+$/) {
+                    print $3 ":" $2
+                  } else {
+                    print $NF
+                  }
+                }
+              '
+            } \
+            > "$OUTPUT"
+          echo "  -> Generated enriched list with $(wc -l < "$OUTPUT") entries."
+
+          cat "$OUTPUT"
+
+          # ====================================================================
+          # STAGE 4: SORT FINAL RESULTS INTO ROOT DOMAIN FOLDERS
+          # ====================================================================
           OUTPUT_ROOT="results"
           mkdir -p "$OUTPUT_ROOT"
-
-          if [ ! -s "$PUREDNS_OUT" ]; then
-            echo "No live hostnames found in this chunk. Leaving results/ empty."
-            exit 0
-          fi
-
-          echo "-> Sample of puredns_output.txt (first 5 lines):"
-          head -n 5 "$PUREDNS_OUT" || true
-
-          # ───────────────────────────────────────────────────────────
-          # Step C+D: For each parent domain, filter matching hostnames
-          # ───────────────────────────────────────────────────────────
-          echo "DEBUG: Starting per-parent filtering with AWK (domain-only mode)"
+          echo "-> Sorting all results into per-domain folders..."
           while read -r parent; do
-            # Strip any carriage returns or trailing whitespace
             clean_parent=$(printf '%s' "$parent" | tr -d '\r' | xargs)
-            if [ -z "$clean_parent" ]; then
-              echo "DEBUG: Skipping empty parent line"
-              continue
-            fi
-
-            echo "DEBUG: Processing parent => [[$clean_parent]]"
+            if [ -z "$clean_parent" ]; then continue; fi
             mkdir -p "$OUTPUT_ROOT/$clean_parent"
-            outfile="$OUTPUT_ROOT/$clean_parent/puredns_result.txt"
 
-            echo "DEBUG: AWK filtering host==$clean_parent or subdomain of $clean_parent from $PUREDNS_OUT into $outfile"
+            # Sort the simple puredns results (This file doesn't exist in the reference, but we keep it for extra data)
+            simple_outfile="$OUTPUT_ROOT/$clean_parent/puredns_results.txt"
+            grep -E "(^|\\.)${clean_parent//./\\.}(\$)" "$PUREDNS_FILE"  | anew -q "$simple_outfile" || true
 
-            awk -v b="$clean_parent" '
-            {
-              host = $1
-              if (host == b || host ~ ("\\." b "$")) {
-                print $0
-              }
-            }
-            ' "$PUREDNS_OUT" > "$outfile" 2>/tmp/awk_error.log
-            awk_exit=$?
-            if [ $awk_exit -ne 0 ]; then
-              echo "ERROR: AWK exited with code $awk_exit for parent='$clean_parent'."
-              echo "DEBUG: Contents of /tmp/awk_error.log:"
-              cat /tmp/awk_error.log || true
-            fi
+            # Sort the enriched subdomain:port results
+            ports_outfile="$OUTPUT_ROOT/$clean_parent/subdomain_ports.txt"
+            grep -E "(^|\\.)${clean_parent//./\\.}(\:|\$)" "$OUTPUT" --color=never | anew -q "$ports_outfile" || true
+          done < "$PARENT_DOMAINS_SCOPE"
 
-            if [ -f "$outfile" ]; then
-              lines_written=$(wc -l < "$outfile")
-              echo "DEBUG: '$outfile' contains $lines_written line(s)."
-              if [ $lines_written -gt 0 ]; then
-                echo "DEBUG: Sample lines from '$outfile':"
-                head -n 3 "$outfile" || true
-              else
-                echo "DEBUG: '$outfile' is empty."
-              fi
-            else
-              echo "DEBUG: '$outfile' was not created."
-            fi
+          # ====================================================================
+          # STAGE 5: CLEANUP (Matches reference)
+          # ====================================================================
+          rm -f "$TMP_CLEANMASSDNS" "$MASSDNS" "$PUREDNS_FILE"
+          rm -f "$TMP_IP2SUB" "$TMP_IP_ONLY" "$TMP_NONCDN" "$TMP_CDN" "$TMP_SMAP_NONCDN" "$TMP_RUSTSCAN"
 
-          done < parent_domains.txt
-          echo "-> Split complete for domain '$DOMAIN'."
-          mkdir -p results
-      
       - name: Compute SAFE_CHUNK (no slashes)
         run: |
           SAFE_CHUNK="${{ matrix.pair.chunk }}"
           SAFE_CHUNK="$(echo "$SAFE_CHUNK" | tr '/' '_')"
-          echo "SAFE_CHUNK=$SAFE_CHUNK" >> $GITHUB_ENV              
+          echo "SAFE_CHUNK=$SAFE_CHUNK" >> $GITHUB_ENV
 
-      - name: Upload Secondary Account puredns+dsieve Results (as artifact)
+      - name: Upload Secondary Account Results
         uses: actions/upload-artifact@v4
         with:
-          name: secondary_puredns_dsieve_${{ matrix.pair.domain }}_${{ env.SAFE_CHUNK }}
+          name: recon-results-secondary-${{ env.SAFE_CHUNK }}
           path: results/
           retention-days: 1
 
+  # ====================================================================
+  # JOB 4: Merge All Results (Identical to reference workflow)
+  # ====================================================================
+  merge_results:
+    name: Merge All Distributed Results
+    runs-on: ubuntu-latest
+    needs: process_assigned_chunks_secondary    
+    if: always()
+    outputs:
+      has_results: ${{ steps.consolidate.outputs.has_results }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Download all result artifacts from all accounts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'recon-results-*'
+          path: temp-aggregated-results
+          merge-multiple: true
+      - name: Consolidate all results into root domain folders
+        id: consolidate
+        shell: bash
+        run: |
+          set -e
+          mkdir -p final_results
+          if [ ! -d "temp-aggregated-results" ] || [ -z "$(ls -A temp-aggregated-results)" ]; then
+            echo "::warning:: No result artifacts were found. Nothing to merge."
+            echo "has_results=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "INFO: Aggregating all downloaded results..."
+          for filepath in $(find temp-aggregated-results -type f -name "puredns_results.txt"); do
+            parent_domain=$(basename "$(dirname "$filepath")")
+            dest_file="final_results/$parent_domain/puredns_results.txt"
+            mkdir -p "final_results/$parent_domain"
+            cat "$filepath" >> "$dest_file"
+          done
+          echo "INFO: Aggregating subdomain port data..."
+          for filepath in $(find temp-aggregated-results -type f -name "subdomain_ports.txt"); do
+            parent_domain=$(basename "$(dirname "$filepath")")
+            dest_file="final_results/$parent_domain/subdomain_ports.txt"
+            mkdir -p "final_results/$parent_domain"
+            cat "$filepath" >> "$dest_file"
+          done
+          echo "INFO: De-duplicating all aggregated files..."
+          for final_file in $(find final_results -type f -name "*.txt"); do
+              sort -u -o "$final_file" "$final_file"
+          done
+          if [ -z "$(ls -A final_results)" ]; then
+            echo "::warning:: Result artifacts contained no valid data to merge."
+            echo "has_results=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "has_results=true" >> $GITHUB_OUTPUT
+          echo "✅ Successfully consolidated results from all accounts."
+          ls -R final_results
+      - name: Upload Final Consolidated Artifact
+        if: steps.consolidate.outputs.has_results == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-recon-results
+          path: final_results/
+          retention-days: 1
+
   commit_all_secondary_results:
-    name: Commit All Secondary Results
-    needs: process_assigned_chunks_secondary
-    if: github.event.inputs.secondary_matrix_json != '' && github.event.inputs.secondary_matrix_json != '[]'
+    name: Commit All Results
+    needs: merge_results
+    # This job only runs if the merge_results job actually produced data.
+    if: needs.merge_results.outputs.has_results == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/pcoder7/spider-puredns-actions:latest
       credentials:
         username: ${{ secrets.GHCR_USER }}
-        password: ${{ secrets.GHCR_TOKEN }}        
+        password: ${{ secrets.GHCR_TOKEN }}
     steps:
-      - name: Checkout repository (Account 2's repo)
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download all 'secondary_puredns_dsieve_*' artifacts from this workflow run
+      - name: Download the single consolidated results artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: secondary_puredns_dsieve_*
-          path: temp_results
-      
-      - name: Organize and Push Results to store-recon  
-        shell: bash  
-        env:  
-          STORE_RECON_PAT: ${{ secrets.STORE_RECON_PAT }}  
-          STORE: ${{ secrets.STORE }}  
-          USERNAME: ${{ secrets.USERNAME }}  
-        run: |  
-          echo "Organizing downloaded results..."  
-          git config --global --add safe.directory "$(pwd)"  
+          name: consolidated-recon-results
+          path: final_results
 
-          # Stage 1: collect all temp_results into a workspace-level results/  
-          mkdir -p results  
-          find temp_results -type f -name "puredns_result.txt" | while read -r filepath; do  
-            parent="$(basename "$(dirname "$filepath")")"  
-            mkdir -p "results/$parent"  
-            cat "$filepath" | anew -q "results/$parent/puredns_result.txt"  
-            echo "WORKFLOW RUN: 'results/$parent/puredns_result.txt' contains $(wc -l < "results/$parent/puredns_result.txt") valid domains for parent $parent."
-          done || true  
+      - name: Organize and Push to store-recon
+        shell: bash
+        env:
+          STORE_RECON_PAT: ${{ secrets.PAT_FOR_SECONDARY }}
+          ACCOUNT2_USERNAME: ${{ secrets.ACCOUNT2_REPO_OWNER }}
+          STORE: ${{secrets.STORE}}
+          CORRELATION_ID: ${{ github.event.inputs.primary_run_id }}
+        run: |
+          set -e
+          RESULTS_DIR="${GITHUB_WORKSPACE}/final_results"
+          if [ ! -d "$RESULTS_DIR" ] || [ -z "$(ls -A "$RESULTS_DIR")" ]; then
+            echo "::warning:: Results directory is empty or does not exist. Nothing to commit."
+            exit 0
+          fi
+          echo "Cloning ${{ env.STORE }} to commit results..."
+          git config --global user.name "Puredns-Permut Bot"
+          git config --global user.email "actions-bot@users.noreply.github.com"
+          TMP_DIR="$(mktemp -d)"
+          git clone "https://x-access-token:${STORE_RECON_PAT}@github.com/${ACCOUNT2_USERNAME}/${STORE}.git" "$TMP_DIR"
+          cd "$TMP_DIR"
+          echo "Merging new consolidated results into the repository..."
+          for domain_dir in "${RESULTS_DIR}"/*; do
+            if [ ! -d "$domain_dir" ]; then continue; fi
+            domain_name=$(basename "$domain_dir")
+            dest_repo_dir="results/$domain_name"
+            mkdir -p "$dest_repo_dir"
 
-          if [ ! -d "results" ] || [ -z "$(ls -A results)" ]; then  
-            echo "Results directory is empty or missing. Nothing to push."  
-            exit 0  
-          fi  
+            # --- MERGE BLOCK 1 (Identical to reference): puredns_results.txt -> all_subdomains.txt ---
+            source_puredns_file="$domain_dir/puredns_results.txt"
+            dest_all_subs_file="$dest_repo_dir/all_subdomains.txt"
+            if [ -s "$source_puredns_file" ]; then
+              echo "  -> Merging simple results into '$dest_all_subs_file'"
+              temp_merged_file_1=$(mktemp)
+              if [ -f "$dest_all_subs_file" ]; then
+                cat "$source_puredns_file" "$dest_all_subs_file" | sort -u > "$temp_merged_file_1"
+              else
+                sort -u "$source_puredns_file" > "$temp_merged_file_1"
+              fi
+              mv "$temp_merged_file_1" "$dest_all_subs_file"
+            fi
 
-          git config --global user.name "Account2 PureDNS Bot"  
-          git config --global user.email "actions-bot@users.noreply.github.com"  
+            # --- MERGE BLOCK 2 (Identical to reference): subdomain_ports.txt -> puredns_result.txt ---
+            source_ports_file="$domain_dir/subdomain_ports.txt"
+            dest_puredns_file="$dest_repo_dir/puredns_result.txt"
+            if [ -s "$source_ports_file" ]; then
+              echo "  -> Merging enriched port data into '$dest_puredns_file'"
+              temp_merged_file_2=$(mktemp)
+              if [ -f "$dest_puredns_file" ]; then
+                cat "$source_ports_file" "$dest_puredns_file" | sort -u > "$temp_merged_file_2"
+              else
+                sort -u "$source_ports_file" > "$temp_merged_file_2"
+              fi
+              mv "$temp_merged_file_2" "$dest_puredns_file"
+            fi
+          done
 
-          # Clone the private store-recon repo from Account 2  
-          TMP_DIR="$(mktemp -d)"  
-          echo "Cloning store-recon into $TMP_DIR"  
-          git clone "https://x-access-token:${STORE_RECON_PAT}@github.com/${USERNAME}/${STORE}.git" "$TMP_DIR"  
-          cd "$TMP_DIR" || exit 1  
-
-          mkdir -p results  
-
-          # Retry up to 5 times to handle concurrent updates  
-          for i in {1..5}; do  
-            git fetch origin main  
-            git checkout main  
-            git pull --rebase origin main  
-
-            WORKSPACE_RESULTS="${GITHUB_WORKSPACE}/results"  
-            find "$WORKSPACE_RESULTS" -type f -name "puredns_result.txt" | while read -r filepath; do  
-              rel="${filepath#"$WORKSPACE_RESULTS/"}"  
-              mkdir -p "results/$(dirname "$rel")"  
-              cat "$filepath" | anew -q "results/$rel"  
-              echo "DEBUG: 'results/$rel' now has $(wc -l < "results/$rel") lines."  
-            done  
-
-            git add results/  
-            if git diff --cached --quiet; then  
-              echo "No changes to commit in store-recon."  
-              exit 0  
-            fi  
-
-            git commit -m "Add/Update puredns+dsieve results (Primary Run: ${{ github.event.inputs.primary_run_id || github.run_id }})"  
-            if git push origin main; then  
-              echo "Pushed to store-recon successfully on attempt #$i."  
-              exit 0  
-            else  
-              echo "Push to store-recon failed on attempt #$i, retrying..."  
-              git reset --hard origin/main  
-            fi  
-          done  
-
-          echo "ERROR: Could not push results to store-recon after 5 attempts."  
-          exit 1  
-       
- 
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "No new unique data to commit in ${{ env.STORE }}."
+            exit 0
+          fi
+          echo "Committing and pushing changes to ${{ env.STORE }}..."
+          git add results/
+          git commit -m "feat: Add new assets from distributed permutation scan with Correlation ID: ${CORRELATION_ID}"
+          git push -v origin main
+          echo "✅ Successfully pushed new consolidated results to ${{ env.STORE }}."
