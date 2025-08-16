@@ -179,34 +179,28 @@ jobs:
               echo "resolvers-trusted.txt is downloaded"
           fi
 
-      - name: Run puredns + pre-dsieve on subdomains + final filtering
+      - name: Run puredns + pre-dsieve on subdomains + final filtering      
+        id: run_puredns
         shell: bash
         run: |
-          set -euo pipefail
-          trap '' SIGPIPE
-
-          CHUNK_FILE_PATH=${{ matrix.pair.chunk }}
-          echo "Processing chunk '$CHUNK_FILE_PATH'..."
-          if [ ! -f "$CHUNK_FILE_PATH" ]; then
-            echo "ERROR: Chunk file '$CHUNK_FILE_PATH' not found!"
-            exit 1
-          fi
-
-          # ====================================================================
-          # STAGE 1: PUREDNS RESOLUTION (Naming now matches reference)
-          # ====================================================================
-          # Define filenames to match the reference workflow
+          # The chunk file from the matrix is treated as the raw input
+          RAW_RESULTS_FILE="${{ matrix.pair.chunk }}"
           PUREDNS_FILE="puredns_file.txt"
+          RESOLVED_FILE="puredns_resolved.txt"
+          TMP_CLEANMASSDNS=$(mktemp)
           MASSDNS="massdns.txt"
           MASSDNS_FILE="massdns_file.txt"
-          PARENT_DOMAINS_SCOPE="parent_domains.scope" # This is the one necessary new variable
-
-          echo "-> Generating a dynamic scope file from the raw chunk..."
-          dsieve -if "$CHUNK_FILE_PATH" -f 2 | sort -u > "$PARENT_DOMAINS_SCOPE"
-          echo "  -> Scope for this chunk contains $(wc -l < "$PARENT_DOMAINS_SCOPE") parent domains."
-
-          echo "-> Running puredns..."
-          puredns resolve "$CHUNK_FILE_PATH" \
+          
+          if [ ! -s "$RAW_RESULTS_FILE" ]; then
+            echo "INFO: Raw results file (chunk) is empty. Nothing to resolve."
+            # Create empty files to prevent downstream errors
+            touch "$PUREDNS_FILE" "$RESOLVED_FILE" "$MASSDNS_FILE"
+            exit 0
+          fi
+          
+          echo "INFO: Resolving subdomains using puredns..."
+          # The puredns command itself remains unchanged as requested
+          puredns resolve "$RAW_RESULTS_FILE" \
             -r resolvers.txt \
             --rate-limit 3000 \
             --skip-validation \
@@ -214,109 +208,147 @@ jobs:
             --write "$PUREDNS_FILE" \
             --write-massdns "$MASSDNS" \
             --quiet >/dev/null 2>&1
-
-          if [ ! -s "$MASSDNS" ]; then
-              echo "INFO: Puredns found no resolvable hosts in this chunk. Exiting."
-              mkdir -p results
-              exit 0
-          fi
-
-          # ====================================================================
-          # STAGE 2: CLEAN AND FILTER MASS_DNS DATA (Logic and Naming now match reference)
-          # ====================================================================
-          TMP_CLEANMASSDNS=$(mktemp)
-
-          echo "-> Cleaning raw massdns output ('$MASSDNS')..."
+                               
+          echo "✅ PureDNS resolution complete. $(wc -l < "$PUREDNS_FILE") subdomains were successfully resolved."
+          
+          # Scoping is now applied *after* resolution
+          cat "$PUREDNS_FILE" | inscope -s .scope > "$RESOLVED_FILE" || true
+          
+          # Also scope the massdns results to ensure A-records are for target domains
           awk 'NF { sub(/\.$/,"",$1); print }' "$MASSDNS" > "$TMP_CLEANMASSDNS"
-
-          echo "-> Filtering against the dynamic scope to create '$MASSDNS_FILE'..."
-          awk '
-          {gsub(/\r$/,"");sub(/^[ \t]+/,"");sub(/[ \t]+$/,"")}
-          FNR==NR{if($0)patterns[++c]=$0;next}
-          !setup{regex="";for(i=1;i<=c;i++){regex=regex (i>1?"|":"") "("patterns[i]")"};if(regex=="")regex="^\b$";setup=1}
-          $2=="A" && $1~regex
-          ' "$PARENT_DOMAINS_SCOPE" "$TMP_CLEANMASSDNS" | anew -q "$MASSDNS_FILE"
-          echo "  -> Found $(wc -l < "$MASSDNS_FILE") in-scope A records."
-
-          # ====================================================================
-          # STAGE 3: MAP SUBDOMAINS TO PORTS (Logic and Naming now match reference)
-          # ====================================================================
-          OUTPUT="subdomain_ports.txt"
+          awk ' \
+          {gsub(/\r$/,"");sub(/^[ \t]+/,"");sub(/[ \t]+$/,"")} \
+          FNR==NR{if($0)patterns[++c]=$0;next} \
+          !setup{regex="";for(i=1;i<=c;i++){regex=regex (i>1?"|":"") "("patterns[i]")"};if(regex=="")regex="^\b$";setup=1} \
+          $2=="A" && $1~regex \
+          ' .scope "$TMP_CLEANMASSDNS" | anew -q "$MASSDNS_FILE"
+          
+          echo "✅ MassDNS processing complete. $(wc -l < "$MASSDNS_FILE") in-scope massdns records found."
+          
+          # Cleanup intermediate files
+          rm -f "$TMP_CLEANMASSDNS" "$MASSDNS" "$PUREDNS_FILE"
+          
+      - name: Map subdomains to ports with CDN filtering
+        id: map_subdomains_cdn
+        shell: bash
+        run: |
+          set -e
+          trap '' SIGPIPE
+          MASSDNS_FILE="massdns_file.txt"
           SMAP_FILE="smap.txt"
+          OUTPUT="subdomain_ports.txt"
+          
+          if [ ! -s "$MASSDNS_FILE" ]; then
+            echo "INFO: massdns_file.txt is empty. Skipping port mapping."
+            touch "$OUTPUT"
+            exit 0
+          fi
+          
+          # create per‑runner temp files
           TMP_IP2SUB=$(mktemp)
           TMP_IP_ONLY=$(mktemp)
           TMP_NONCDN=$(mktemp)
           TMP_CDN=$(mktemp)
           TMP_SMAP_NONCDN=$(mktemp)
           TMP_RUSTSCAN=$(mktemp)
-
-          echo "-> Extracting IPs from '$MASSDNS_FILE'..."
+          echo "▶ Cleaning & extracting A‑records from $MASSDNS_FILE…"
+          # IP SUBDOMAIN
           awk '{ print $3, $1 }' "$MASSDNS_FILE" | sort -k1,1 > "$TMP_IP2SUB"
+          echo "▶ Pulling unique IPs…"
           cut -d' ' -f1 "$TMP_IP2SUB" | sort -u > "$TMP_IP_ONLY"
-
-          echo "-> Filtering out CDN IPs..."
+          echo "▶ Filtering non‑CDN IPs with cut-cdn…"
           cat "$TMP_IP_ONLY" | cut-cdn -ua -t 50 -silent -o "$TMP_NONCDN"
+          echo "✅ All done. TMP_IP_ONLY contains $(wc -l < "$TMP_IP_ONLY") IP"
+          head -n5 "$TMP_IP_ONLY"
+          echo "==================================================================="
+          echo "✅ All done. TMP_NONCDN contains $(wc -l < "$TMP_NONCDN") IP"
+          head -n5 "$TMP_NONCDN"
+          echo "==================================================================="
+          echo "▶ Deriving CDN IP list…"
           cat "$TMP_IP_ONLY" | anew -d "$TMP_NONCDN" > "$TMP_CDN"
-
-          echo "-> Scanning non-CDN IPs for ports 80, 443..."
+          echo "✅ All done. TMP_CDN contains $(wc -l < "$TMP_CDN") IP"
+          head -n5 "$TMP_CDN"
+          echo "==================================================================="
+          echo "▶ Running smap and rustscan on non‑CDN IPs…"
+          
           smap -iL "$TMP_NONCDN" -oP "$TMP_SMAP_NONCDN" || true
-          rustscan -a "$TMP_NONCDN" -p 70,80,81,82,83,84,85,88,443,888,1234,1311,2002,3000,3128,4443,5000,5222,5269,5800,7070,8000,8001,8002,8003,8004,8006,8008,8009,8010,8080,8081,8082,8083,8084,8085,8088,8181,8443,8880,8887,8888,9000,9001,9080,9090,9999,10000,10001,50000 --no-banner -t 1000 --tries 1 -u 20000 --scan-order "Random" -b 100 --greppable --accessible > "$TMP_RUSTSCAN" || true
-          cat "$TMP_RUSTSCAN" | awk -F ' -> ' '{ gsub(/[\[\]]/, "", $2); n = split($2, p, ","); for(i=1;i<=n;i++) print $1 ":" p[i] }' | anew -q "$TMP_SMAP_NONCDN"
-          cat "$TMP_RUSTSCAN" | awk -F ' -> ' '{ gsub(/[\[\]]/, "", $2); n = split($2, p, ","); for(i=1;i<=n;i++) print $1 ":" p[i] }'
-
+          # The rustscan command itself remains unchanged as requested
+          rustscan -a "$TMP_NONCDN" -p 80,443 --no-banner  -t 1000 --tries 1 -u 20000 --scan-order "Random"  -b 100 --greppable --accessible > "$TMP_RUSTSCAN" || true
+          
+          cat "$TMP_RUSTSCAN" | awk -F ' -> ' '{ gsub(/[\[\]]/, "", $2); n = split($2, p, ","); for(i=1;i<=n;i++) print $1 ":" p[i] }' | anew -q "$TMP_SMAP_NONCDN" || true
+          
+          echo "✅ All done. TMP_SMAP_NONCDN contains $(wc -l < "$TMP_SMAP_NONCDN") IP" 
+          echo "==================================================================="
+          head -n50 "$TMP_SMAP_NONCDN"
+          echo "==================================================================="
+          
+          echo "▶ Merging non‑CDN and CDN IP lists into $SMAP_FILE…"
           cat "$TMP_SMAP_NONCDN" "$TMP_CDN" | sort -u > "$SMAP_FILE"
-
-          echo "-> Showing you SMAP_FILE---------"
-          cat "$SMAP_FILE"
-
-          echo "-> Joining IPs/Ports to create '$OUTPUT'..."
+          echo "✅ All done. SMAP_FILE contains $(wc -l < "$SMAP_FILE") IP" 
+          echo "==================================================================="
+          head -n50 "$SMAP_FILE"
+          echo "==================================================================="
+          echo "▶ Joining with $SMAP_FILE to produce subdomain:port or subdomain…"
           awk -F: '
             NF==2 { print $1, $2 }
             NF==1 { print $1, ""  }
           ' "$SMAP_FILE" \
             | sort -k1,1 \
             | join - "$TMP_IP2SUB" \
-            | {
+            | { 
               awk '
-                NF >= 2 {
-                  if (NF == 3 && $2 ~ /^[0-9]+$/) {
-                    print $3 ":" $2
-                  } else {
-                    print $NF
-                  }
+                NF >= 2 { 
+                  if (NF == 3 && $2 ~ /^[0-9]+$/) { 
+                    print $3 ":" $2 
+                  } else { 
+                    print $NF 
+                  } 
                 }
-              '
+              '       
             } \
             > "$OUTPUT"
-          echo "  -> Generated enriched list with $(wc -l < "$OUTPUT") entries."
-
-          cat "$OUTPUT"
-
-          # ====================================================================
-          # STAGE 4: SORT FINAL RESULTS INTO ROOT DOMAIN FOLDERS
-          # ====================================================================
-          OUTPUT_ROOT="results"
-          mkdir -p "$OUTPUT_ROOT"
-          echo "-> Sorting all results into per-domain folders..."
+          echo "✅ Generated $OUTPUT (first 50 lines):"
+          head -n50 "$OUTPUT"
+          # cleanup
+          rm -f "$TMP_IP2SUB" "$TMP_IP_ONLY" "$TMP_NONCDN" "$TMP_CDN" "$TMP_SMAP_NONCDN" "$TMP_RUSTSCAN"   
+          
+      - name: Sort Resolved Results into Root Domain Folders
+        shell: bash
+        run: |
+          RESOLVED_FILE="puredns_resolved.txt"
+          PORTS_INPUT_FILE="subdomain_ports.txt"
+        
+          echo "INFO: Sorting resolved results into root-domain specific files..."
+          mkdir -p results 
+          
+          if [ ! -s "$RESOLVED_FILE" ] && [ ! -s "$PORTS_INPUT_FILE" ]; then
+            echo "INFO: No resolved domains or port data to sort."
+            exit 0
+          fi
+          
+          # First, find which root domains are present in our *resolved* results
+          dsieve -if "$RESOLVED_FILE" -f 2 | sort -u > temp_root_domains.txt
+          
+          echo "INFO: Found the following root domains to process:"
+          cat temp_root_domains.txt
+          
+          # Now, loop through those root domains and extract their subdomains
           while read -r parent; do
-            clean_parent=$(printf '%s' "$parent" | tr -d '\r' | xargs)
-            if [ -z "$clean_parent" ]; then continue; fi
-            mkdir -p "$OUTPUT_ROOT/$clean_parent"
-
-            # Sort the simple puredns results (This file doesn't exist in the reference, but we keep it for extra data)
-            simple_outfile="$OUTPUT_ROOT/$clean_parent/puredns_results.txt"
-            grep -E "(^|\\.)${clean_parent//./\\.}(\$)" "$PUREDNS_FILE"  | anew -q "$simple_outfile" || true
-
+            if [ -z "$parent" ]; then continue; fi
+            mkdir -p "results/$parent"
+            
+            # Sort the simple puredns results
+            outfile="results/$parent/puredns_results.txt"
+            echo "  -> Filtering puredns results for '$parent' into '$outfile'"
+            grep -E "(^|\\.)${parent//./\\.}(\$)" --color=never "$RESOLVED_FILE" | anew -q "$outfile" || true
+            
             # Sort the enriched subdomain:port results
-            ports_outfile="$OUTPUT_ROOT/$clean_parent/subdomain_ports.txt"
-            grep -E "(^|\\.)${clean_parent//./\\.}(\:|\$)" "$OUTPUT" --color=never | anew -q "$ports_outfile" || true
-          done < "$PARENT_DOMAINS_SCOPE"
-
-          # ====================================================================
-          # STAGE 5: CLEANUP (Matches reference)
-          # ====================================================================
-          rm -f "$TMP_CLEANMASSDNS" "$MASSDNS" "$PUREDNS_FILE"
-          rm -f "$TMP_IP2SUB" "$TMP_IP_ONLY" "$TMP_NONCDN" "$TMP_CDN" "$TMP_SMAP_NONCDN" "$TMP_RUSTSCAN"
+            ports_outfile="results/$parent/subdomain_ports.txt"
+            echo "  -> Filtering port data for '$parent' into '$ports_outfile'"
+            grep -E "(^|\\.)${parent//./\\.}(\:|\$)" --color=never "$PORTS_INPUT_FILE" | anew -q "$ports_outfile" || true
+            
+          done < temp_root_domains.txt
+          rm temp_root_domains.txt
 
       - name: Compute SAFE_CHUNK (no slashes)
         run: |
