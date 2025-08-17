@@ -523,7 +523,7 @@ jobs:
           for (( i=1; i<=MAX_ATTEMPTS; i++ )); do
             echo "[Attempt $i/$MAX_ATTEMPTS] Committing and pushing changes..."
             git pull --rebase origin main
-            git commit -m "feat: Add new assets from distributed permutation scan from Correlation ID: ${{ github.run_id }}" || true
+            git commit -m "feat: Add new assets from distributed permutation scan from Correlation ID: ${CORRELATION_ID}" || true
             if git push -v origin main; then
               echo "✅ Successfully pushed new consolidated results to ${{ env.STORE }} on attempt $i."
               exit 0
