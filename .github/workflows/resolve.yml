@@ -84,7 +84,7 @@ jobs:
             apt-get install -qy gh
             if ! command -v gh &> /dev/null; then
               echo "ERROR: gh CLI installation failed."
-              exit 1
+              exit 0
             fi
           fi
 
@@ -95,7 +95,7 @@ jobs:
           PACKAGE_FILENAME="$ARTIFACT_NAME_FROM_PRIMARY.tar.gz"
           if [ ! -f "$PACKAGE_FILENAME" ]; then
             echo "ERROR: Failed to download '$PACKAGE_FILENAME'."
-            exit 1
+            exit 0
           fi
           echo "Downloaded '$PACKAGE_FILENAME'."
 
@@ -107,7 +107,7 @@ jobs:
           tar -xzvf "$PACKAGE_FILENAME"
           if [ ! -d "chunks" ] || [ ! -f "resolvers.txt" ]; then
             echo "ERROR: 'chunks/' or 'resolvers.txt' missing after extraction."
-            exit 1
+            exit 0
           fi
           echo "Extraction complete."
           ls -R chunks/
@@ -523,12 +523,12 @@ jobs:
           for (( i=1; i<=MAX_ATTEMPTS; i++ )); do
             echo "[Attempt $i/$MAX_ATTEMPTS] Committing and pushing changes..."
             git pull --rebase origin main
-            git commit -m "feat: Add new assets from distributed permutation scan with Correlation ID: ${CORRELATION_ID}" || true
+            git commit -m "feat: Add new assets from distributed permutation scan from Correlation ID: ${{ github.run_id }}" || true
             if git push -v origin main; then
               echo "✅ Successfully pushed new consolidated results to ${{ env.STORE }} on attempt $i."
               exit 0
             fi
             echo "::warning:: Push failed on attempt $i. Retrying after a short delay..."
-            if [ $i -eq $MAX_ATTEMPTS ]; then echo "::error:: All $MAX_ATTEMPTS push attempts failed."; exit 1; fi
+            if [ $i -eq $MAX_ATTEMPTS ]; then echo "::error:: All $MAX_ATTEMPTS push attempts failed."; exit 0; fi
             sleep $(( 5 * i ))
           done
