@@ -447,13 +447,12 @@ jobs:
       - name: Organize and Push to store-recon
         shell: bash
         env:
-          STORE_RECON_PAT: ${{ secrets.PAT_FOR_SECONDRY }}
+          STORE_RECON_PAT: ${{ secrets.PAT_FOR_SECONDARY }}
           ACCOUNT2_USERNAME: ${{ secrets.ACCOUNT2_REPO_OWNER }}
           STORE: ${{secrets.STORE}}
           CORRELATION_ID: ${{ github.run_id }}
         run: |
        
-
           RESULTS_DIR="${GITHUB_WORKSPACE}/final_results"
 
           if [ ! -d "$RESULTS_DIR" ] || [ -z "$(ls -A "$RESULTS_DIR")" ]; then
