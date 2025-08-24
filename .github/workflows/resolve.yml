@@ -450,7 +450,7 @@ jobs:
           STORE_RECON_PAT: ${{ secrets.PAT_FOR_SECONDARY }}
           ACCOUNT2_USERNAME: ${{ secrets.ACCOUNT2_REPO_OWNER }}
           STORE: ${{secrets.STORE}}
-          CORRELATION_ID: ${{ github.run_id }}
+          CORRELATION_ID: ${{ github.event.inputs.primary_run_id }}
         run: |
        
           RESULTS_DIR="${GITHUB_WORKSPACE}/final_results"
