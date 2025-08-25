@@ -430,7 +430,7 @@ jobs:
   commit_all_results:
     name: Commit All Results
     needs: merge_results
-    if: needs.merge_results.outputs.has_results == 'true'
+    if: always() && needs.merge_results.outputs.has_results == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/pcoder7/spider-puredns-actions:latest
