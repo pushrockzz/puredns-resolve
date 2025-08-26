@@ -372,16 +372,31 @@ jobs:
     needs: process_assigned_chunks_secondary    
     if: always()
     outputs:
-      has_results: ${{ steps.consolidate.outputs.has_results }}
+      has_results: ${{ steps.check_artifacts.outputs.has_results }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+     
       - name: Download all result artifacts from all accounts
         uses: actions/download-artifact@v4
         with:
           pattern: 'recon-results-*'
           path: temp-aggregated-results
           merge-multiple: true
+     
+      - name: Check if artifacts were downloaded
+        id: check_artifacts
+        shell: bash
+        run: |
+          if [ -d "temp-aggregated-results" ] && [ -n "$(ls -A temp-aggregated-results)" ]; then
+            echo "-> Artifacts found. Proceeding with merge."
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "-> No artifacts found to merge. Skipping the rest of this job."
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+          
+      
       - name: Consolidate all results into root domain folders
         id: consolidate
         shell: bash
