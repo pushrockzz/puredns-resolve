@@ -372,7 +372,7 @@ jobs:
     needs: process_assigned_chunks_secondary    
     if: always()
     outputs:
-      has_results: ${{ steps.check_artifacts.outputs.has_results }}
+      has_results: ${{ steps.check_artifacts.outputs.has_found }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
