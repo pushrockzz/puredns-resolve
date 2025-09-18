@@ -186,6 +186,7 @@ jobs:
           # The chunk file from the matrix is treated as the raw input
           RAW_RESULTS_FILE="${{ matrix.pair.chunk }}"
           PUREDNS_FILE="puredns_file.txt"
+          WILDCARD_FILE="wildcard_file.txt"
           RESOLVED_FILE="puredns_resolved.txt"
           TMP_CLEANMASSDNS=$(mktemp)
           MASSDNS="massdns.txt"
@@ -203,9 +204,11 @@ jobs:
           puredns resolve "$RAW_RESULTS_FILE" \
             -r resolvers.txt \
             --rate-limit 3000 \
+            --wildcard-tests 300 \
+            --wildcard-batch 100000 \
             --skip-validation \
-            --skip-wildcard-filter \
             --write "$PUREDNS_FILE" \
+            --write-wildcards "$WILDCARD_FILE" \
             --write-massdns "$MASSDNS" \
             --quiet >/dev/null 2>&1
                                
