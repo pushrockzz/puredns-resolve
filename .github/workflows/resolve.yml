@@ -179,7 +179,7 @@ jobs:
               echo "resolvers-trusted.txt is downloaded"
           fi
 
-
+      - name: Run Assetfinder with GNU Parallel on Chunk
         id: run_puredns
         shell: bash
         run: |
