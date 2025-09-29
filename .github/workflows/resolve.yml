@@ -179,7 +179,7 @@ jobs:
               echo "resolvers-trusted.txt is downloaded"
           fi
 
-      - name: Run Assetfinder with GNU Parallel on Chunk
+      - name: Resolve Discovered Subdomains with PureDNS
         id: run_puredns
         shell: bash
         run: |
@@ -231,7 +231,6 @@ jobs:
       - name: Sort Resolved Results into Root Domain Folders
         shell: bash
         run: |
-
                 RESOLVED_FILE="puredns_resolved.txt"
                 MASSDNS_FILE="massdns_file.txt"
                 mkdir -p results
@@ -289,7 +288,7 @@ jobs:
                         if [ -s "$MASSDNS_FILE" ]; then
                                 grep -E "(^|\\.)${parent//./\\.}(\s|\$)" --color=never "$MASSDNS_FILE" | anew -q "results/$parent/massdns_file.txt" || true
                         fi
-                done < temp_root_domains.txt
+                done < temp_root_domains.txt          
 
       - name: Compute SAFE_CHUNK (no slashes)
         run: |
