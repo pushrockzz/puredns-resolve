@@ -320,40 +320,71 @@ jobs:
       - name: Sort Resolved Results into Root Domain Folders
         shell: bash
         run: |
-          RESOLVED_FILE="puredns_resolved.txt"
-          PORTS_INPUT_FILE="subdomain_ports.txt"
-        
-          echo "INFO: Sorting resolved results into root-domain specific files..."
-          mkdir -p results 
-          
-          if [ ! -s "$RESOLVED_FILE" ] && [ ! -s "$PORTS_INPUT_FILE" ]; then
-            echo "INFO: No resolved domains or port data to sort."
-            exit 0
-          fi
-          
-          # First, find which root domains are present in our *resolved* results
-          dsieve -if "$RESOLVED_FILE" -f 2 | sort -u > temp_root_domains.txt
-          
-          echo "INFO: Found the following root domains to process:"
-          cat temp_root_domains.txt
-          
-          # Now, loop through those root domains and extract their subdomains
-          while read -r parent; do
-            if [ -z "$parent" ]; then continue; fi
-            mkdir -p "results/$parent"
-            
-            # Sort the simple puredns results
-            outfile="results/$parent/puredns_results.txt"
-            echo "  -> Filtering puredns results for '$parent' into '$outfile'"
-            grep -E "(^|\\.)${parent//./\\.}(\$)" --color=never "$RESOLVED_FILE" | anew -q "$outfile" || true
-            
-            # Sort the enriched subdomain:port results
-            ports_outfile="results/$parent/subdomain_ports.txt"
-            echo "  -> Filtering port data for '$parent' into '$ports_outfile'"
-            grep -E "(^|\\.)${parent//./\\.}(\:|\$)" --color=never "$PORTS_INPUT_FILE" | anew -q "$ports_outfile" || true
-            
-          done < temp_root_domains.txt
-          rm temp_root_domains.txt
+                
+                RESOLVED_FILE="puredns_resolved.txt"
+                MASSDNS_FILE="massdns_file.txt"
+                mkdir -p results
+
+                # -------------------------
+                # Option B: in-memory awk filter
+                # Keep only massdns lines whose hostname exists in RESOLVED_FILE
+                # -------------------------
+                # If massdns file doesn't exist or is empty -> nothing to do
+                if [ ! -s "$MASSDNS_FILE" ]; then
+                        echo "INFO: No massdns file ($MASSDNS_FILE) present or empty; skipping filter."
+                else
+                        # If resolved file empty -> produce empty MASSDNS_FILE (no extraneous junk)
+                        if [ ! -s "$RESOLVED_FILE" ]; then
+                                echo "INFO: Resolved file is empty -> clearing $MASSDNS_FILE per policy."
+                                : > "$MASSDNS_FILE"
+                        else
+                                echo "INFO: Filtering $MASSDNS_FILE using allowlist from $RESOLVED_FILE (in-memory awk)."
+                                TMP_FILTERED=$(mktemp)
+                                awk 'BEGIN{FS=OFS="\t"}
+                                # First pass: read allowlist (RESOLVED_FILE)
+                                FNR==NR {
+                                        gsub(/\r/,""); sub(/^[ \t]+|[ \t]+$/,"");
+                                        sub(/\.$/,""); host=tolower($0);
+                                        if(length(host)) allowed[host]=1;
+                                        next
+                                }
+                                # Second pass: process massdns lines (MASSDNS_FILE)
+                                NF {
+                                        host=$1; sub(/\.$/,"",host);
+                                        if(allowed[tolower(host)]) print $0;
+                                }' "$RESOLVED_FILE" "$MASSDNS_FILE" > "$TMP_FILTERED"
+
+                                # atomically replace original massdns file with filtered one
+                                mv "$TMP_FILTERED" "$MASSDNS_FILE"
+                                echo "INFO: Filtered massdns count: $(wc -l < "$MASSDNS_FILE" || true)"
+                        fi
+                fi
+
+                # -------------------------
+                # Build combined list (same as before)
+                # -------------------------
+                # Create a combined list of all subdomains from both files to find all possible root domains
+                cat "$RESOLVED_FILE" 2>/dev/null > combined_subdomains.txt
+                awk '{print $1}' "$MASSDNS_FILE" 2>/dev/null >> combined_subdomains.txt
+                if [ ! -s "combined_subdomains.txt" ]; then echo "INFO: No resolvable data in this chunk."; exit 0; fi
+
+                # Extract unique root domains from the combined list
+                dsieve -if "combined_subdomains.txt" -f 2 | sort -u > temp_root_domains.txt
+
+                while read -r parent; do
+                        if [ -z "$parent" ]; then continue; fi; mkdir -p "results/$parent"
+
+                        # Logic for puredns results (only if the source file has content)
+                        if [ -s "$RESOLVED_FILE" ]; then
+                                grep -E "(^|\\.)${parent//./\\.}(\$)" --color=never "$RESOLVED_FILE" | anew -q "results/$parent/puredns_results.txt" || true
+                        fi
+
+                        # Logic for massdns file (only if the source file has content)
+                        if [ -s "$MASSDNS_FILE" ]; then
+                                grep -E "(^|\\.)${parent//./\\.}(\s|\$)" --color=never "$MASSDNS_FILE" | anew -q "results/$parent/massdns_file.txt" || true
+                        fi
+                done < temp_root_domains.txt
+
 
       - name: Compute SAFE_CHUNK (no slashes)
         run: |
